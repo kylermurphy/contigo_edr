@@ -522,8 +522,6 @@ class Spacecraft:
             del self._state_data_cache
 
     def spherical(self) -> npt.NDArray[np.float64]:
-        self.state_ecef
-
         r = np.linalg.norm(self.state_ecef[:,0:3], axis=1)
         lat = np.arctan2(self.state_ecef[:,2],
                          np.linalg.norm(self.state_ecef[:,0:2], axis=1))
@@ -552,5 +550,5 @@ class Spacecraft:
         return len(list(self.unique_ids))
 
     def __repr__(self) -> str:
-        return f"Spacecraft(N={self.N}), n_unique_ids={self.n_unique_ids}, "
+        return f"Spacecraft(N={self.N}, n_unique_ids={self.n_unique_ids})"
 
