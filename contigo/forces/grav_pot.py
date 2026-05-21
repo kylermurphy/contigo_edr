@@ -165,7 +165,7 @@ class GravPot:
         if hasattr(self, "gravpot"):
             return self.gravpot
         else:
-             ValueError('Potential needs to be calculated.')
+            raise ValueError('Potential needs to be calculated.')
 
 
 class EarthPotential(ForceModel):
