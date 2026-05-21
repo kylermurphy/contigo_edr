@@ -22,7 +22,7 @@ def data_path():
     if not d_dir.exists():
         makedirs(d_dir)
 
-    return d_dir._str
+    return str(d_dir)
 
 # Static configuration values (constants)
 DATA_DIR = data_path()
