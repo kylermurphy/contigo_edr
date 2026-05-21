@@ -29,8 +29,8 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
     slm : 2-D np.array of shape [l,m] holding the c coeffecients for the spherical 
         harmonics     
     dictionary containg the meta data from the file. 
-        GM - gravatational constant of object (km^3/s^2)
-        r0 - radius of object (km)
+        GM - gravatational constant of object (m^3/s^2)
+        r0 - radius of object (m)
         
     Reference
     ---------
@@ -63,7 +63,7 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
                 gm = float(row[1])
 
 
-    return clm, slm, {'prodcut':product,'r0':r0/1000., 'GM':gm/(1000.**3), 'lmax':lmax}
+    return clm, slm, {'prodcut':product,'r0':r0, 'GM':gm, 'lmax':lmax}
 
 def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     """Derive Gravatational Potential
@@ -73,7 +73,7 @@ def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     the derivation faster, namely the sum of the double for loop
 
     The units of r, gm, and r0 should be consitent. For example if r is
-    kilometers the r0 should be in kilometers and GM in km^3/s^2
+    meters the r0 should be in meters and GM in m^3/s^2
 
     Parameters
     ----------

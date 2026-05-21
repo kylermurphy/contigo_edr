@@ -19,8 +19,6 @@ import spiceypy as spice
 from contigo.contigo_utils import time_utils
 from contigo.contigo_utils import utils
 
-##TODO Future proof units
-
 @dataclass
 class Spacecraft:
     """Spacecraft class for loading and storing spacecraft state info.
@@ -32,8 +30,8 @@ class Spacecraft:
     and guaranteed after loading. A simplified container class 
     SpacecraftState is used to store the finalized internal state. 
 
-    The state is assumed to be position [x,y,z], velocity [vx,vy,vz] in ECEF
-    and spacecraft physical properties and ID. 
+    The state is assumed to be position [x,y,z] (m), velocity [vx,vy,vz] (m/s) in ECEF
+    and spacecraft physical properties and ID. Internal state is always stored in SI units.
 
     Raises:
         ValueError: _description_
@@ -95,7 +93,7 @@ class Spacecraft:
     srp_area_col: str | None = None
 
     # ------------------------------------------------------------------
-    # Internal normalized state (strict)
+    # Internal normalized state (strict, always SI: m and m/s)
     # ------------------------------------------------------------------
     state_ecef: npt.NDArray[np.float64] = field(init=False)  # (N,6)
     stime: pd.DatetimeIndex = field(init=False)              # (N,)
@@ -330,14 +328,14 @@ class Spacecraft:
         self.srp_area_arr = norm(self.srp_area, self.srp_area_col)
 
     def _normalize_units(self):
-        """Convert meters to kilometer if unit is meters
+        """Convert input units to SI (meters, m/s).
 
         Raises:
-            ValueError: currently only accepts meters
-        """        
-        if self.unit in ["m", "meter", "metre"]:
-            self.state_ecef /= 1000.0
-        elif self.unit in ["km", "kilometer", "kilometre"]:
+            ValueError: if unit is not 'm' or 'km'
+        """
+        if self.unit in ["km", "kilometer", "kilometre"]:
+            self.state_ecef *= 1000.0
+        elif self.unit in ["m", "meter", "metre"]:
             pass
         else:
             raise ValueError(f"Unsupported unit: {self.unit}")
@@ -449,6 +447,7 @@ class Spacecraft:
                 time=self.stime[idx],
                 sc_id_input=np.full(idx.shape[0], uid),
                 tscale_input=self.tscale,
+                unit_input='m',
                 cd=self.cd_arr[idx],
                 drag_area=self.drag_area_arr[idx],
                 sc_mass=self.sc_mass_arr[idx],

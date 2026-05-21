@@ -42,9 +42,9 @@ class ThirdBodyAcc:
         bodies such as the Sun and Moon.
 
         Position is a (n,3) array that needs to be in Earth Centered Earth Fixed
-        (ECEF) coordinate frame. Units are km's. 
-        
-        The body GM constants are in units of km^3/s^2. 
+        (ECEF) coordinate frame. Units are meters.
+
+        The body GM constants are in units of m^3/s^2.
 
         Uses the SPICE (Spacecraft, Planet, Instrument, C-matrix, Events) observation 
         geometry information system and Kernels from JPLs Navigation and Ancillary 
@@ -55,8 +55,8 @@ class ThirdBodyAcc:
         Parameters
         ----------
         spos : npt.ArrayLike (n,3), optional
-            An array of spacecraft positions (ECEF - kilometers), 
-            by default np.array([6771.0,0,0],ndmin=2)
+            An array of spacecraft positions (ECEF - meters),
+            by default np.array([6_771_000.0,0,0],ndmin=2)
         stime : npt.ArrayLike (n), optional
             An array of spacecraft times for which the position of body are retrieved.
             The scale of the time is needed in order to derive JPL SPICE ephemeris 
@@ -84,9 +84,9 @@ class ThirdBodyAcc:
         ValueError
             scale not in allowed scales
         """
-        # set defaults 
+        # set defaults
         if spos is None:
-            spos = np.array([[6771.0, 0.0, 0.0]])
+            spos = np.array([[6_771_000.0, 0.0, 0.0]])
         if stime is None:
             stime = pd.Series(pd.to_datetime("2020-01-01"))
         if body is None:

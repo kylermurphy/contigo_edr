@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class GravPot:
     """Class to derive gravatational potential for a set of ECEF coordinates.
     """
-    def __init__(self, r: npt.ArrayLike=np.array(6771.0,ndmin=1),
+    def __init__(self, r: npt.ArrayLike=np.array(6_771_000.0,ndmin=1),
                  lat: npt.ArrayLike=np.array(0,ndmin=1),
                  lon: npt.ArrayLike=np.array(np.pi,ndmin=1),
                  pot_file: str = 'EIGEN-2.gfc',
@@ -30,20 +30,20 @@ class GravPot:
         """Ititialize the GravPot Class to calculate Earth gravitational potential.
 
         Position (r, lat, lon) needs to be in an Earth Centered Earth Fixed
-        (ECEF) coordinate frame.     
-        Units are km and radians for position (r, lat, lon).
-        The Gravatational Potential is calculated in units of km^2/s^2.
+        (ECEF) coordinate frame.
+        Units are meters and radians for position (r, lat, lon).
+        The Gravatational Potential is calculated in units of m^2/s^2.
 
         Parameters
         ----------
         r : npt.ArrayLike, optional
-            An array of radial positions (ECEF - kilometers), 
-            by default np.array(6771000.0,ndmin=1)
+            An array of radial positions (ECEF - meters),
+            by default np.array(6_771_000.0,ndmin=1)
         lat : npt.ArrayLike, optional
-            An array of latitude positions (ECEF - radians), 
+            An array of latitude positions (ECEF - radians),
             by default np.array(0,ndmin=1)
         lon : npt.ArrayLike, optional
-            An array of longitude positions (ECEF - radians), 
+            An array of longitude positions (ECEF - radians),
             by default np.array(np.pi,ndmin=1)
         pot_file : str, optional
             ICGEM potential file used to derive the gravatational
@@ -51,9 +51,9 @@ class GravPot:
             clm, slm, and metadata
             by default 'EIGEN-2.gfc'
         lmax : int, optional
-            Maximum degree/order for deriving the gravatational potential. 
+            Maximum degree/order for deriving the gravatational potential.
             If lmax is larger then the max degree/order of the loaded potential
-            file (lload) then lmax is set to lload, 
+            file (lload) then lmax is set to lload,
             by default 50
         """
         r = np.asarray(r)
@@ -134,7 +134,7 @@ class GravPot:
         values which are then passed to .grav_utils._get_potential_numba_core
         which uses numba and jit to improve the performace of the calculation.
 
-        The Gravatational Potential is calculated in units of km^2/s^2.
+        The Gravatational Potential is calculated in units of m^2/s^2.
 
         Raises
         ------
@@ -160,7 +160,7 @@ class GravPot:
         Returns
         -------
         np.array
-            Array of potetial in km^2/s^2
+            Array of potetial in m^2/s^2
         """
         if hasattr(self, "gravpot"):
             return self.gravpot

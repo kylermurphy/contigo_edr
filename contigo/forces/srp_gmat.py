@@ -35,7 +35,7 @@ class SRPGMATAcc:
 
         This instantiation uses the Cannonball method from the GMAT API.
 
-        Both the ECEF and ECI accelerations are derived in km/s^2. 
+        Both the ECEF and ECI accelerations are derived in km/s^2 internally (GMAT units).
 
         Parameters
         ----------
@@ -212,7 +212,7 @@ class SRPAcc(ForceModel):
         acc_dict = {}
         for sc_id, sc in constellation.spacecraft.items():
 
-            srp = SRPGMATAcc(sc_state=sc.state_ecef,
+            srp = SRPGMATAcc(sc_state=sc.state_ecef / 1000.0,  # m → km for GMAT
                              sc_time=sc.time,
                              sc_cr=sc.cr_arr,
                              sc_srparea=sc.srp_area_arr,
@@ -220,7 +220,7 @@ class SRPAcc(ForceModel):
                              apistartup=self.apistartup,
                              gmat_install=self.gmat_install)
             srp.calc_srp()
-            acc_dict[sc_id] = srp.get_ecef_acc()
+            acc_dict[sc_id] = srp.get_ecef_acc() * 1000.0  # km/s² → m/s²
 
         return acc_dict
 

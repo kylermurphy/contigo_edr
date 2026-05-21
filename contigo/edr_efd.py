@@ -267,7 +267,7 @@ class EDRDensity:
 
         for sc_id, sc in spacecraft_dict.items():
             
-            b=sc.cd_arr*(sc.drag_area_arr/1000.**2)/sc.sc_mass_arr
+            b=sc.cd_arr*sc.drag_area_arr/sc.sc_mass_arr
             
             sc_v = sc.state_ecef[:, 3:]
             sc_v3 = np.linalg.norm(sc_v,axis=1)**3

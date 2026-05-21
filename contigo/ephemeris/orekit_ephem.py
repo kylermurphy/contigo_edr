@@ -69,5 +69,4 @@ class OrekitEphem(EphemerisProvider):
                                                   offsets, 
                                                   ArrayList(body))
         
-        # convert to km and return
-        return np.array(r_body, dtype=np.float64)/1000.0
+        return np.array(r_body, dtype=np.float64)
