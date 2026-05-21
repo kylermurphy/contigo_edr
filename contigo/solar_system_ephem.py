@@ -47,7 +47,7 @@ class SolarSystemEnvironment:
         # value -> (Nb, 3) position array
         self._cache: dict[float, np.ndarray] = {}
 
-        if self._chectimes(ephem_time, gps_time, utc_time):
+        if self._check_times(ephem_time, gps_time, utc_time):
             ephem_time = np.asarray(ephem_time, dtype=float)
             gps_time = np.asarray(gps_time,dtype=float)
             utc_time = np.asarray(utc_time)
@@ -153,7 +153,7 @@ class SolarSystemEnvironment:
             # r_new shape = (Nb, Nt_missing, 3)
             self._cache[t] = r_new[:, i, :]
 
-    def _chectimes(self,ephem_time, gps_time, utc_time):
+    def _check_times(self, ephem_time, gps_time, utc_time):
         if isinstance(ephem_time, type(None)) and isinstance(gps_time, type(None)) and isinstance(utc_time, type(None)):
             return False
         else:
