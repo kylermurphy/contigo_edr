@@ -46,7 +46,7 @@ dependencies = [
     "pyshtools",
     "spiceypy>=8.0.2",
     "orekit-jpype[jdk4py]>=13.1.4",
-    "jpype1>=1.4"
+    "jpype1>=1.4",
     "jdk4py>=25.0"
 ]
 
