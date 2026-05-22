@@ -113,10 +113,10 @@ class SolarSystemEnvironment:
         """Quantize time using tolerance and return integer bin."""
         if self.tolerance == 0.0:
             # exact integer seconds binning
-            return np.round(t).astype(int)
+            return np.round(t).astype(np.int64)
         elif self.tolerance is None:
             return t
-        return np.round(t / self.tolerance).astype(int)
+        return np.round(t / self.tolerance).astype(np.int64)
 
     def _load_times(self, 
                     ephem_time: np.ndarray,
