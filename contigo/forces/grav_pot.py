@@ -1,4 +1,4 @@
-"""Derive gravatational potential of Earth for a set of ECEF coordinates.
+"""Derive gravitational potential of Earth for a set of ECEF coordinates.
 
 added: 03/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
@@ -11,8 +11,7 @@ import contigo.config as config
 
 from contigo.forces.base import ForceModel
 
-from .grav_utils import read_icgem_coeff
-from .grav_utils import get_potential
+from .grav_utils import read_icgem_coeff, get_potential_batch
 from contigo.constellation import Constellation
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
@@ -20,41 +19,39 @@ logger = logging.getLogger(__name__)
 
 
 class GravPot:
-    """Class to derive gravatational potential for a set of ECEF coordinates.
+    """Class to derive gravitational potential for a set of ECEF coordinates.
     """
-    def __init__(self, r: npt.ArrayLike=np.array(6771.0,ndmin=1),
+    def __init__(self, r: npt.ArrayLike=np.array(6_771_000.0,ndmin=1),
                  lat: npt.ArrayLike=np.array(0,ndmin=1),
                  lon: npt.ArrayLike=np.array(np.pi,ndmin=1),
                  pot_file: str = 'EIGEN-2.gfc',
                  lmax: int=50):
-        """Ititialize the GravPot Class to calculate Earth gravitational potential.
+        """Initialize the GravPot Class to calculate Earth gravitational potential.
 
         Position (r, lat, lon) needs to be in an Earth Centered Earth Fixed
-        (ECEF) coordinate frame.     
-        Units are km and radians for position (r, lat, lon).
-        The Gravatational Potential is calculated in units of km^2/s^2.
+        (ECEF) coordinate frame.
+        Units are meters and radians for position (r, lat, lon).
+        The Gravitational Potential is calculated in units of m^2/s^2.
 
         Parameters
         ----------
         r : npt.ArrayLike, optional
-            An array of radial positions (ECEF - kilometers), 
-            by default np.array(6771000.0,ndmin=1)
+            An array of radial positions (ECEF - meters),
+            by default np.array(6_771_000.0,ndmin=1)
         lat : npt.ArrayLike, optional
-            An array of latitude positions (ECEF - radians), 
+            An array of latitude positions (ECEF - radians),
             by default np.array(0,ndmin=1)
         lon : npt.ArrayLike, optional
-            An array of longitude positions (ECEF - radians), 
+            An array of longitude positions (ECEF - radians),
             by default np.array(np.pi,ndmin=1)
         pot_file : str, optional
-            ICGEM potential file used to derive the gravatational
+            ICGEM potential file used to derive the gravitational
             potential, uses .grav_utils.read_icgem_coeff which returns
-            clm, slm, and metadata
-            by default 'EIGEN-2.gfc'
+            clm, slm, and metadata, by default 'EIGEN-2.gfc'
         lmax : int, optional
-            Maximum degree/order for deriving the gravatational potential. 
-            If lmax is larger then the max degree/order of the loaded potential
-            file (lload) then lmax is set to lload, 
-            by default 50
+            Maximum degree/order for deriving the gravitational potential.
+            If lmax is larger than the max degree/order of the loaded potential
+            file then lmax is set to the file's maximum, by default 50
         """
         r = np.asarray(r)
         if r.ndim == 0: r = r.reshape(1)
@@ -97,7 +94,7 @@ class GravPot:
         Parameters
         ----------
         pot_file : str, optional
-            ICGEM potential file used to derive the gravatational
+            ICGEM potential file used to derive the gravitational
             potential, uses .grav_utils.read_icgem_coeff which returns
             clm, slm, and metadata, by default None
         """
@@ -134,25 +131,25 @@ class GravPot:
         values which are then passed to .grav_utils._get_potential_numba_core
         which uses numba and jit to improve the performace of the calculation.
 
-        The Gravatational Potential is calculated in units of km^2/s^2.
+        The Gravitational Potential is calculated in units of m^2/s^2.
 
         Raises
         ------
         ValueError
-            If potential coeffecients haven't been loaded.
+            If potential coefficients haven't been loaded.
         ValueError
             If the size of the position values, r, lat, lon are not the same.
         """
-        # check if coeffecients have been loaded
+        # check if coefficients have been loaded
         if self.clm is None:
             raise ValueError('No coeffecients have been loaded, use load_coef( )')
         # check to make r, lat, lon are the same size
         if len(self.r) != len(self.lat) or len(self.r) != len(self.lon):
             raise ValueError('r, lat, and lon must be same length')
 
-        self.gravpot = np.array([get_potential(rr, rlat, rlon,
-                    self.clm, self.slm, self.GM, self.r0, lmax=self.lmax)
-                    for rr, rlat, rlon in zip(self.r,self.lat,self.lon)])
+        self.gravpot = get_potential_batch(
+            self.r, self.lat, self.lon,
+            self.clm, self.slm, self.GM, self.r0, lmax=self.lmax)
 
     def get_pot(self):
         """Return Potential.
@@ -160,12 +157,12 @@ class GravPot:
         Returns
         -------
         np.array
-            Array of potetial in km^2/s^2
+            Array of potetial in m^2/s^2
         """
         if hasattr(self, "gravpot"):
             return self.gravpot
         else:
-             ValueError('Potential needs to be calculated.')
+            raise ValueError('Potential needs to be calculated.')
 
 
 class EarthPotential(ForceModel):
@@ -173,7 +170,7 @@ class EarthPotential(ForceModel):
     Earth Gravatational Potential ForceModel implementation using the GravPot class.
     """
 
-    name: str = "EarthGravatationalPotential"
+    name: str = "EarthGravitationalPotential"
 
     def __init__(self,
                  pot_file: str = 'EIGEN-2.gfc',

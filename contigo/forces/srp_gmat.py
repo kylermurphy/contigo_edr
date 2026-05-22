@@ -19,7 +19,7 @@ from contigo.constellation import Constellation
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
 class SRPGMATAcc:
-    """Deriving *Cannonball* SRP accelleration from GMAT
+    """Deriving *Cannonball* SRP acceleration from GMAT
     """
 
     def __init__(self,
@@ -28,14 +28,14 @@ class SRPGMATAcc:
                  sc_cr: npt.ArrayLike | None = None,
                  sc_srparea: npt.ArrayLike | None = None,
                  sc_mass:  npt.ArrayLike | None = None,
-                 apistartup: str | None = None, 
+                 apistartup: str | None = None,
                  gmat_install: str | None = None):
         """Initialize the SRPGMATAcc class for deriving SRP acceleration from the
-        General Mission Analysis Tool (GMAT). 
+        General Mission Analysis Tool (GMAT).
 
         This instantiation uses the Cannonball method from the GMAT API.
 
-        Both the ECEF and ECI accelerations are derived in km/s^2. 
+        Both the ECEF and ECI accelerations are derived in km/s^2 internally (GMAT units).
 
         Parameters
         ----------
@@ -167,7 +167,7 @@ class SRPGMATAcc:
 
 class SRPAcc(ForceModel):
     """
-    SRP accelerations for invdividual satellites in a Constellation object.
+    SRP accelerations for individual satellites in a Constellation object.
     """
 
     name: str = "SRPGMATCannonball"
@@ -212,7 +212,7 @@ class SRPAcc(ForceModel):
         acc_dict = {}
         for sc_id, sc in constellation.spacecraft.items():
 
-            srp = SRPGMATAcc(sc_state=sc.state_ecef,
+            srp = SRPGMATAcc(sc_state=sc.state_ecef / 1000.0,  # m → km for GMAT
                              sc_time=sc.time,
                              sc_cr=sc.cr_arr,
                              sc_srparea=sc.srp_area_arr,
@@ -220,7 +220,7 @@ class SRPAcc(ForceModel):
                              apistartup=self.apistartup,
                              gmat_install=self.gmat_install)
             srp.calc_srp()
-            acc_dict[sc_id] = srp.get_ecef_acc()
+            acc_dict[sc_id] = srp.get_ecef_acc() * 1000.0  # km/s² → m/s²
 
         return acc_dict
 

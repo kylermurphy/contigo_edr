@@ -16,7 +16,7 @@ from contigo.solar_system_ephem import SolarSystemEnvironment
 
 class EDRDensity:
     """
-    Energy Dissipation Rate and Effiective Density calculator.
+    Energy Dissipation Rate and Effective Density calculator.
 
     Accepts:
         - Constellation
@@ -25,11 +25,11 @@ class EDRDensity:
 
     Computes:
         - Effective density
-        - Energy dissipation rate 
+        - Energy dissipation rate
         - Denominator of the effective density calculation
         - Solar System Ephemeris
         - Accelerations
-        - Graviational potential
+        - Gravitational potential
     """
 
     def __init__(self,
@@ -37,12 +37,12 @@ class EDRDensity:
                  solarsys_env: SolarSystemEnvironment,
                  force_models: list[ForceModel],
                  potential_model: ForceModel,):
-        """Intialize the EDRDensity calculator. 
+        """Initialize the EDRDensity calculator.
 
         Parameters
         ----------
         constellation : Constellation
-            Constellation container with the spcaecraft state, physical properties,
+            Constellation container with the spacecraft state, physical properties,
             spacecraft IDs, and time arrays.
         solarsys_env : SolarSystemEnvironment
             Solar System Environment container to load the ephemeris of solar system 
@@ -62,9 +62,9 @@ class EDRDensity:
         unique_gps, u_id = np.unique(constellation.sspice_gps, return_index=True)
 
         # load ephemeris for all unique times
-        self.solarsys_env._load_times(ephem_time=constellation.sspice_et[u_id], 
-                                      gps_time=unique_gps, 
-                                      utc_time=constellation.sc_utc)
+        self.solarsys_env._load_times(ephem_time=constellation.sspice_et[u_id],
+                                      gps_time=unique_gps,
+                                      utc_time=constellation.sc_utc[u_id])
 
 
     def compute_den(self,
@@ -103,7 +103,7 @@ class EDRDensity:
 
         # create dictionary for effective density results 
         self.efd = {}
-        # compute edr and denomentator from A18 and A19 of 
+        # compute edr and denominator from A18 and A19 of
         # https://doi.org/10.1029/2024EA003898
         self.edr = self.compute_edr()
         self.denom = self.compute_denom()
@@ -128,38 +128,30 @@ class EDRDensity:
             # smooth the edr
             edr_sm = pd.Series(edr).rolling(smth_edr, min_periods=1, center=True).mean().to_numpy() 
 
-            n_win = self.constellation[sc_id].sc_utc[-1] - \
-                    self.constellation[sc_id].sc_utc[0]
-            n_win = int(n_win.total_seconds()/window.total_seconds())+10
+            sc_utc = self.constellation[sc_id].sc_utc
+            id0_list, id1_list = [], []
 
-            id0 = np.zeros(n_win, dtype=int)
-            id1 = np.zeros(n_win, dtype=int)
+            s = sc_utc[0]
+            e = s + window
 
-            # start and end time for the effective density calculation
-            s = self.constellation[sc_id].sc_utc[0]
-            e = s+window
+            while e < sc_utc[-1]:
+                i0 = np.searchsorted(sc_utc, s, side='left')
+                i1 = np.searchsorted(sc_utc, e, side='left') - 1
+                id0_list.append(i0)
+                id1_list.append(i1)
+                s += window
+                e += window
 
-            # get the indices of the window start and end times for subtractions
-            i = 0
-            while e < self.constellation[sc_id].sc_utc[-1]:
-                # find the indices of the edr time series that fall within the window
-                idx = np.where((self.constellation[sc_id].sc_utc >= s) & 
-                               (self.constellation[sc_id].sc_utc < e))
+            id0 = np.array(id0_list)
+            id1 = np.array(id1_list)
 
-                id0[i] = idx[0].min()
-                id1[i] = idx[0].max()
-                i +=1
-
-                s = s+window
-                e = e+window
-
-            delta_edr = edr_sm[id1[0:i]] - edr_sm[id0[0:i]]
-            delta_den = denom[id1[0:i]] - denom[id0[0:i]]
+            delta_edr = edr_sm[id1] - edr_sm[id0]
+            delta_den = denom[id1] - denom[id0]
 
             efd_sat = -2*delta_edr/delta_den
-            efd_t = self.constellation[sc_id].sc_utc[id1[0:i]] + \
-                    (self.constellation[sc_id].sc_utc[id1[0:i]] - \
-                    self.constellation[sc_id].sc_utc[id1[0:i]])/2.
+            efd_t = self.constellation[sc_id].sc_utc[id0] + \
+                    (self.constellation[sc_id].sc_utc[id1] - \
+                    self.constellation[sc_id].sc_utc[id0])/2.
 
             if smth_den is not None:
                 efd_sat = pd.Series(efd_sat).rolling(smth_den, min_periods=1, 
@@ -230,10 +222,10 @@ class EDRDensity:
             acc_int = np.zeros(N)
             x_ax = sc.sspice_gps
             x_ax = x_ax-x_ax.min()
-            for m_id, m_acc in acc_con.items():
-                # if the force model returns multiple accelerations
-                # loop through them all
-                if m_acc[sc_id].shape[0] != N:
+            for m_acc in acc_con.values():
+                # if the force model returns multiple accelerations (B,N,3)
+                # loop through each body
+                if m_acc[sc_id].ndim == 3:
                     for i in range(m_acc[sc_id].shape[0]):
                         acc = m_acc[sc_id][i,:,:]
                         if acc.shape[0] != N:
@@ -267,7 +259,7 @@ class EDRDensity:
 
         for sc_id, sc in spacecraft_dict.items():
             
-            b=sc.cd_arr*(sc.drag_area_arr/1000.**2)/sc.sc_mass_arr
+            b=sc.cd_arr*sc.drag_area_arr/sc.sc_mass_arr
             
             sc_v = sc.state_ecef[:, 3:]
             sc_v3 = np.linalg.norm(sc_v,axis=1)**3

@@ -12,7 +12,7 @@ from .spacecraft import Spacecraft
 # ==================================================================
 class Constellation:
     """
-    Constellation container that accepts the SAME inputs as Spacecraft,
+    Constellation container that accepts the same inputs as Spacecraft,
     performs loading once, and then splits into individual Spacecraft
     objects using Spacecraft.split_by_id().
 
@@ -72,8 +72,12 @@ class Constellation:
 
         # Split into individual spacecraft
         self.spacecraft: dict = multi_sc.split_by_id()
-        # Get constellation times from spacecraft
-        # keep only unique times
+
+        # Union of unique times across all spacecraft in the constellation.
+        # Used by EDRDensity to pre-load ephemeris for all epochs in one call.
+        # sspice_gps : (M,) GPS seconds — primary sort/dedup key
+        # sspice_et  : (M,) SPICE ephemeris time (TDB seconds past J2000)
+        # sc_utc     : (M,) Python datetime objects in UTC
         self.sspice_gps, u_id = np.unique(multi_sc.sspice_gps, return_index=True)
         self.sspice_et = multi_sc.sspice_et[u_id]
         self.sc_utc = multi_sc.sc_utc[u_id]

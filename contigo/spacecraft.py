@@ -1,4 +1,4 @@
-"""Spacecraft conatiner class for managin individual spacecraft states, 
+"""Spacecraft container class for managing individual spacecraft states,
 physical properties, and IDs.
 
 added: 18/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
@@ -19,41 +19,20 @@ import spiceypy as spice
 from contigo.contigo_utils import time_utils
 from contigo.contigo_utils import utils
 
-##TODO Future proof units
-
 @dataclass
 class Spacecraft:
     """Spacecraft class for loading and storing spacecraft state info.
 
-    This is an extended container class for the contigo module
+    This is an extended container class for the contigo module.
 
     Raw inputs may be provided directly (state, time) OR loaded
     from one or more files on disk. Internal state is always strict
-    and guaranteed after loading. A simplified container class 
-    SpacecraftState is used to store the finalized internal state. 
+    and guaranteed after loading. A simplified container class
+    SpacecraftState is used to store the finalized internal state.
 
-    The state is assumed to be position [x,y,z], velocity [vx,vy,vz] in ECEF
-    and spacecraft physical properties and ID. 
-
-    Raises:
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        ValueError: _description_
-        FileNotFoundError: _description_
-        NotImplementedError: _description_
-        ValueError: _description_
-
-    Returns:
-        _type_: _description_
-    """    
+    The state is assumed to be position [x,y,z] (m), velocity [vx,vy,vz] (m/s) in ECEF.
+    Internal state is always stored in SI units.
+    """
 
     # ------------------------------------------------------------------
     # Raw user inputs (flexible)
@@ -61,8 +40,8 @@ class Spacecraft:
     state: npt.ArrayLike | None = None        # (N,6) [x,y,z,vx,vy,vz]
     time: npt.ArrayLike | None = None         # (N,)
     sc_id_input: npt.ArrayLike | None = None  # (N,)
-    tscale_input: str | None = None          # ['GPS','TAI','UTC','ET','TDB']
-    unit_input: str = 'km'
+    tscale_input: str | None = None           # ['GPS','TAI','UTC','ET','TDB']
+    unit_input: str = 'm'                     # ['m', 'km']
 
     # Spacecraft physical properties (scalar or (N,))
     cd: float | npt.ArrayLike | None = None
@@ -95,7 +74,7 @@ class Spacecraft:
     srp_area_col: str | None = None
 
     # ------------------------------------------------------------------
-    # Internal normalized state (strict)
+    # Internal normalized state (strict, always SI: m and m/s)
     # ------------------------------------------------------------------
     state_ecef: npt.NDArray[np.float64] = field(init=False)  # (N,6)
     stime: pd.DatetimeIndex = field(init=False)              # (N,)
@@ -147,21 +126,23 @@ class Spacecraft:
                          sc_id: npt.ArrayLike | None = None,) -> None:
         """Load spacecraft state from arrays passed in creation.
 
-        Args:
-            state (npt.ArrayLike): (N,6) spacecraft state [x,y,z,vx,vy,vz]
+        Parameters
+        ----------
+        state : npt.ArrayLike
+            (N,6) spacecraft state [x,y,z,vx,vy,vz].
+        time : npt.ArrayLike
+            (N,) time associated with spacecraft state.
+        sc_id : npt.ArrayLike | None, optional
+            Spacecraft IDs, by default None.
 
-            time (npt.ArrayLike): (N,) time associated with spacecraft state
-
-            sc_id (npt.ArrayLike | None, optional): spacecraft IDs to parse. Defaults to None.
-
-        Raises:
-            ValueError: make sure spacecraft state is (N,6) containing position [x,y,z] and
-            velocity [vx,vy,vz].
-
-            ValueError: spacecraft state and time must have the same number of elements in 
-            the dimensions.
-
-            ValueError: if passed spacecraft IDs must (N,)
+        Raises
+        ------
+        ValueError
+            state must have shape (N,6).
+        ValueError
+            state and time must have the same length.
+        ValueError
+            sc_id must be 1D and same length as time.
         """
         # clear any cached data
         self._clear_cache() 
@@ -203,27 +184,26 @@ class Spacecraft:
                        read_kwargs: dict | None = None,) -> None:
         """Load spacecraft state from one or more files.
 
-        Args:
-            state_file (str | Path | Iterable[str  |  Path]): Files to load into spacecraft
-            state. Specific columns are required to be loaded (time, x, y, z, vx, vy, vs).
-            optional columns are (spacecraft id, coeffecient of drag, drag area, spacecraft
-            mass, coeffecient of reflection, SRP area).
+        Parameters
+        ----------
+        state_file : str | Path | Iterable[str | Path]
+            Files to load. Required columns: time, x, y, z, vx, vy, vz.
+            Optional columns: spacecraft id, coefficient of drag, drag area,
+            spacecraft mass, coefficient of reflection, SRP area.
+        loader : str | None, optional
+            Loader to use: 'csv', 'hdf', or 'sp3'. If None the loader is
+            inferred from the file extension, by default None.
+        read_kwargs : dict | None, optional
+            Keyword arguments forwarded to the loader function, by default None.
 
-            loader (str | None, optional): Specify the loader to use to when parseing the
-            state files (state_file). If it is None then the loader is inferred from the
-            file extension. The loaders which can be used are pandas.read_csv(),
-            pandas.read_hdf(), or contigo.utils.df_sp3() Defaults to None.
-
-            read_kwargs (dict | None, optional): Keyword arguments to pass to the loaders.
-            Defaults to None.
-
-        Raises:
-            ValueError: Specific columns must be defined when reading data.
-            (t, x, y, z, vx, vy, vz).
-
-            ValueError: Spacecraft state must be (N,6).
-
-            ValueError: First dimension of Spacecraft state and time must be N.
+        Raises
+        ------
+        ValueError
+            Required columns (time, x, y, z, vx, vy, vz) are missing.
+        ValueError
+            State data must have shape (N,6).
+        ValueError
+            Time and state must have equal length.
         """
         # clear any cached data
         self._clear_cache()    
@@ -330,14 +310,14 @@ class Spacecraft:
         self.srp_area_arr = norm(self.srp_area, self.srp_area_col)
 
     def _normalize_units(self):
-        """Convert meters to kilometer if unit is meters
+        """Convert input units to SI (meters, m/s).
 
         Raises:
-            ValueError: currently only accepts meters
-        """        
-        if self.unit in ["m", "meter", "metre"]:
-            self.state_ecef /= 1000.0
-        elif self.unit in ["km", "kilometer", "kilometre"]:
+            ValueError: if unit is not 'm' or 'km'
+        """
+        if self.unit in ["km", "kilometer", "kilometre"]:
+            self.state_ecef *= 1000.0
+        elif self.unit in ["m", "meter", "metre"]:
             pass
         else:
             raise ValueError(f"Unsupported unit: {self.unit}")
@@ -449,6 +429,7 @@ class Spacecraft:
                 time=self.stime[idx],
                 sc_id_input=np.full(idx.shape[0], uid),
                 tscale_input=self.tscale,
+                unit_input='m',
                 cd=self.cd_arr[idx],
                 drag_area=self.drag_area_arr[idx],
                 sc_mass=self.sc_mass_arr[idx],
@@ -523,8 +504,6 @@ class Spacecraft:
             del self._state_data_cache
 
     def spherical(self) -> npt.NDArray[np.float64]:
-        self.state_ecef
-
         r = np.linalg.norm(self.state_ecef[:,0:3], axis=1)
         lat = np.arctan2(self.state_ecef[:,2],
                          np.linalg.norm(self.state_ecef[:,0:2], axis=1))
@@ -553,5 +532,5 @@ class Spacecraft:
         return len(list(self.unique_ids))
 
     def __repr__(self) -> str:
-        return f"Spacecraft(N={self.N}), n_unique_ids={self.n_unique_ids}, "
+        return f"Spacecraft(N={self.N}, n_unique_ids={self.n_unique_ids})"
 

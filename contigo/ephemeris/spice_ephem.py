@@ -79,7 +79,7 @@ class SPICEEphem(EphemerisProvider):
             [
             spice.spkpos(bd.upper(), unique_et, self.frame,'NONE',self.observer)[0]
             for bd in body
-            ])
+            ]) * 1000.0  # SPICE returns km; convert to m
 
         r_body = r_unique[:,inv,:]
         return r_body

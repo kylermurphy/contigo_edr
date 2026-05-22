@@ -47,7 +47,7 @@ class SolarSystemEnvironment:
         # value -> (Nb, 3) position array
         self._cache: dict[float, np.ndarray] = {}
 
-        if self._chectimes(ephem_time, gps_time, utc_time):
+        if self._check_times(ephem_time, gps_time, utc_time):
             ephem_time = np.asarray(ephem_time, dtype=float)
             gps_time = np.asarray(gps_time,dtype=float)
             utc_time = np.asarray(utc_time)
@@ -113,10 +113,10 @@ class SolarSystemEnvironment:
         """Quantize time using tolerance and return integer bin."""
         if self.tolerance == 0.0:
             # exact integer seconds binning
-            return np.round(t).astype(int)
+            return np.round(t).astype(np.int64)
         elif self.tolerance is None:
             return t
-        return np.round(t / self.tolerance).astype(int)
+        return np.round(t / self.tolerance).astype(np.int64)
 
     def _load_times(self, 
                     ephem_time: np.ndarray,
@@ -153,8 +153,5 @@ class SolarSystemEnvironment:
             # r_new shape = (Nb, Nt_missing, 3)
             self._cache[t] = r_new[:, i, :]
 
-    def _chectimes(self,ephem_time, gps_time, utc_time):
-        if isinstance(ephem_time, type(None)) and isinstance(gps_time, type(None)) and isinstance(utc_time, type(None)):
-            return False
-        else:
-            return True
+    def _check_times(self, ephem_time, gps_time, utc_time):
+        return not (ephem_time is None and gps_time is None and utc_time is None)

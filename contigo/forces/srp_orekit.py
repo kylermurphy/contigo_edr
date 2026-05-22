@@ -78,13 +78,13 @@ class SRPOrekitCB(ForceModel):
                  dtype=np.float64)
             
             acc = SRPCannonballBatchHelper.get_acc(ref_date, offsets,
-                                                    sc.state*1000.,
+                                                    sc.state_ecef,
                                                     sc.sc_mass_arr,
                                                     sc.srp_area_arr,
                                                     sc.cr_arr)
             acc = np.array(acc)
-            # get only the ecef acceleration and convert back to km/s^2
-            acc_dict[sc_id] = acc[:,3:]/1000.
+            # get only the ecef acceleration (m/s^2)
+            acc_dict[sc_id] = acc[:,3:]
 
         return acc_dict
 

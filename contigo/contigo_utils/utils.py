@@ -10,7 +10,6 @@ import zipfile
 import gzip
 import io
 
-from os import path
 from datetime import datetime
 from dateutil import tz
 from tqdm import tqdm
@@ -122,18 +121,20 @@ def df_sp3(fn):
     dt = pd.to_datetime(dt, format='%Y %m %d %H %M %S.%f', errors='coerce')
 
     pdf = pd.DataFrame(data=dat, columns=['sat', 'x', 'y', 'z'])
-    pdf[['x', 'y', 'z']] = pdf[['x', 'y', 'z']].astype(float)
-    
-    # Basic check: if you have 1 epoch but 32 satellites, 
+    # SP3c position is in km; convert to m
+    pdf[['x', 'y', 'z']] = pdf[['x', 'y', 'z']].astype(float) * 1000.0
+
+    # Basic check: if you have 1 epoch but 32 satellites,
     # you'll need to repeat the 'dt' values to match 'dat' length.
     if len(dt) != len(pdf):
-        # This is a placeholder; real SP3 logic usually requires 
+        # This is a placeholder; real SP3 logic usually requires
         # tracking the current epoch inside the loop.
-        pass 
+        pass
     else:
         pdf['time'] = dt
 
     vdf = pd.DataFrame(data=vel, columns=['vx', 'vy', 'vz'])
-    vdf[['vx', 'vy', 'vz']] = vdf[['vx', 'vy', 'vz']].astype(float) / 10000.
+    # SP3c velocity is in units of 10^-4 dm/s; convert to m/s
+    vdf[['vx', 'vy', 'vz']] = vdf[['vx', 'vy', 'vz']].astype(float) / 10.0
 
     return pd.concat([pdf, vdf], axis=1)
