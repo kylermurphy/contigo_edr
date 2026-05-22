@@ -59,8 +59,8 @@ class Spacecraft:
     state: npt.ArrayLike | None = None        # (N,6) [x,y,z,vx,vy,vz]
     time: npt.ArrayLike | None = None         # (N,)
     sc_id_input: npt.ArrayLike | None = None  # (N,)
-    tscale_input: str | None = None          # ['GPS','TAI','UTC','ET','TDB']
-    unit_input: str = 'km'
+    tscale_input: str | None = None           # ['GPS','TAI','UTC','ET','TDB']
+    unit_input: str = 'm'                     # ['m', 'km']
 
     # Spacecraft physical properties (scalar or (N,))
     cd: float | npt.ArrayLike | None = None
