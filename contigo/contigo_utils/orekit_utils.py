@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Union, Optional
 
 import requests
+import jdk4py
 import jpype
 import orekit_jpype as orekit
 
@@ -15,6 +16,11 @@ def start_orekit(vmargs: Union[str, None] = None,
 
     if jpype.isJVMStarted() is False:
         print('Starting Orekit JVM')
+        # setup the JAVA_HOME environment in order to use orekit
+        # some users might not need this but we want to make sure 
+        # it works for everyone so we set it to the jdk4py JAVA_HOME 
+        # which is compatible with orekit
+        os.environ["JAVA_HOME"] = str(jdk4py.JAVA_HOME)
         # get the base directory so we can find files
         f_path = Path(__file__).resolve()
         base_dir = f_path / '..' / '..' / '..'
