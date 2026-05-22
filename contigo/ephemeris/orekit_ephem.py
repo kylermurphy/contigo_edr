@@ -6,26 +6,33 @@ import numpy as np
 import numpy.typing as npt
 
 import contigo.config as config
-if config.state['orekit_loaded'] is False:
-    from contigo.contigo_utils import orekit_utils
-    orekit_utils.start_orekit()
-
-from java.util import ArrayList
 
 from contigo.ephemeris.base import EphemerisProvider
 
-from org.orekit.time import AbsoluteDate, TimeScalesFactory
-from org.contigo.orekit_utils import EphemerisBatchHelper
 
 class OrekitEphem(EphemerisProvider):
     """
     Orekit-backed ephemeris provider.
     """
 
-    def __init__(self, 
-                 ephemeris: str='de440s'):
-        
-        self.ephemeris= ephemeris
+    def __init__(self,
+                 ephemeris: str = 'de440s'):
+
+        if config.state['orekit_loaded'] is False:
+            from contigo.contigo_utils import orekit_utils
+            orekit_utils.start_orekit()
+
+        # Java imports deferred until JVM is running
+        from java.util import ArrayList
+        from org.orekit.time import AbsoluteDate, TimeScalesFactory
+        from org.contigo.orekit_utils import EphemerisBatchHelper
+
+        self._ArrayList = ArrayList
+        self._AbsoluteDate = AbsoluteDate
+        self._TimeScalesFactory = TimeScalesFactory
+        self._EphemerisBatchHelper = EphemerisBatchHelper
+
+        self.ephemeris = ephemeris
 
     def __call__(self, body: list[str],
                  utc_time: np.ndarray | None = None,
@@ -44,7 +51,6 @@ class OrekitEphem(EphemerisProvider):
         utc_time : npt.NDArray[np.datetime64]
             UTC datetime array corresponding to ephem_time.
 
-            
         Returns
         -------
         np.ndarray
@@ -52,21 +58,21 @@ class OrekitEphem(EphemerisProvider):
 
         Notes
         -----
-        This provider only uses utc_time for its internal logic, but the interface 
+        This provider only uses utc_time for its internal logic, but the interface
         allows for flexibility in case future providers need to use different
         time systems.
         """
-        utc = TimeScalesFactory.getUTC()
+        utc = self._TimeScalesFactory.getUTC()
         first_dt = utc_time[0]
-        ref_date = AbsoluteDate(first_dt.year, first_dt.month, first_dt.day,
-                                        first_dt.hour, first_dt.minute,
-                                        float(first_dt.second), utc) 
+        ref_date = self._AbsoluteDate(first_dt.year, first_dt.month, first_dt.day,
+                                      first_dt.hour, first_dt.minute,
+                                      float(first_dt.second), utc)
         offsets = np.array(
             [(t - first_dt).total_seconds() for t in utc_time],
             dtype=np.float64)
 
-        r_body = EphemerisBatchHelper.getBodyECEF(ref_date, 
-                                                  offsets, 
-                                                  ArrayList(body))
-        
+        r_body = self._EphemerisBatchHelper.getBodyECEF(ref_date,
+                                                        offsets,
+                                                        self._ArrayList(body))
+
         return np.array(r_body, dtype=np.float64)
