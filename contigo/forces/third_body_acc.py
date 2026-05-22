@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 class ThirdBodyAcc:
     """Deriving Third Body Acceleration using JPL SPICE
     """
-    def __init__(self, 
+    def __init__(self,
                  spos: npt.ArrayLike | None = None,
                  stime: npt.ArrayLike | None = None,
                  body: npt.ArrayLike | None = None,
                  GM: npt.ArrayLike | None = None,
                  scale: str | None = None,
                  ephemeris: str='de440s'):
-        """Initialize the ThirdBodyAcc Class for deriving accelleration from third
+        """Initialize the ThirdBodyAcc Class for deriving acceleration from third
         bodies such as the Sun and Moon.
 
         Position is a (n,3) array that needs to be in Earth Centered Earth Fixed

@@ -19,7 +19,7 @@ from contigo.constellation import Constellation
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
 class SRPGMATAcc:
-    """Deriving *Cannonball* SRP accelleration from GMAT
+    """Deriving *Cannonball* SRP acceleration from GMAT
     """
 
     def __init__(self,
@@ -28,10 +28,10 @@ class SRPGMATAcc:
                  sc_cr: npt.ArrayLike | None = None,
                  sc_srparea: npt.ArrayLike | None = None,
                  sc_mass:  npt.ArrayLike | None = None,
-                 apistartup: str | None = None, 
+                 apistartup: str | None = None,
                  gmat_install: str | None = None):
         """Initialize the SRPGMATAcc class for deriving SRP acceleration from the
-        General Mission Analysis Tool (GMAT). 
+        General Mission Analysis Tool (GMAT).
 
         This instantiation uses the Cannonball method from the GMAT API.
 
@@ -167,7 +167,7 @@ class SRPGMATAcc:
 
 class SRPAcc(ForceModel):
     """
-    SRP accelerations for invdividual satellites in a Constellation object.
+    SRP accelerations for individual satellites in a Constellation object.
     """
 
     name: str = "SRPGMATCannonball"

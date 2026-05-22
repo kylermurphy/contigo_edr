@@ -16,7 +16,7 @@ from contigo.solar_system_ephem import SolarSystemEnvironment
 
 class EDRDensity:
     """
-    Energy Dissipation Rate and Effiective Density calculator.
+    Energy Dissipation Rate and Effective Density calculator.
 
     Accepts:
         - Constellation
@@ -25,11 +25,11 @@ class EDRDensity:
 
     Computes:
         - Effective density
-        - Energy dissipation rate 
+        - Energy dissipation rate
         - Denominator of the effective density calculation
         - Solar System Ephemeris
         - Accelerations
-        - Graviational potential
+        - Gravitational potential
     """
 
     def __init__(self,
@@ -37,12 +37,12 @@ class EDRDensity:
                  solarsys_env: SolarSystemEnvironment,
                  force_models: list[ForceModel],
                  potential_model: ForceModel,):
-        """Intialize the EDRDensity calculator. 
+        """Initialize the EDRDensity calculator.
 
         Parameters
         ----------
         constellation : Constellation
-            Constellation container with the spcaecraft state, physical properties,
+            Constellation container with the spacecraft state, physical properties,
             spacecraft IDs, and time arrays.
         solarsys_env : SolarSystemEnvironment
             Solar System Environment container to load the ephemeris of solar system 
@@ -103,7 +103,7 @@ class EDRDensity:
 
         # create dictionary for effective density results 
         self.efd = {}
-        # compute edr and denomentator from A18 and A19 of 
+        # compute edr and denominator from A18 and A19 of
         # https://doi.org/10.1029/2024EA003898
         self.edr = self.compute_edr()
         self.denom = self.compute_denom()

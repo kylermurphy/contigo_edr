@@ -1,7 +1,7 @@
 """
-Utilities for deriving gravatational potential.
+Utilities for deriving gravitational potential.
 
-Uses numba and jit to perform faster calculations of gravatational potential.
+Uses numba and jit to perform faster calculations of gravitational potential.
 
 added: 03/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
@@ -24,18 +24,17 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
 
     Returns
     -------
-    clm : 2-D np.array of shape [l,m] holding the c coeffecients for the spherical 
+    clm : 2-D np.array of shape [l,m] holding the C coefficients for the spherical
         harmonics
-    slm : 2-D np.array of shape [l,m] holding the c coeffecients for the spherical 
-        harmonics     
-    dictionary containg the meta data from the file. 
-        GM - gravatational constant of object (m^3/s^2)
-        r0 - radius of object (m)
-        
+    slm : 2-D np.array of shape [l,m] holding the S coefficients for the spherical
+        harmonics
+    dict
+        Metadata from the file: GM (m^3/s^2), r0 (m), lmax, product type.
+
     Reference
     ---------
     https://icgem.gfz.de/
-    """    
+    """
     with open(file_path, "r", encoding=encoding) as potfile:
         #reader = csv.reader(potfile, delimiter=" ", skipinitialspace=True)
         for line in potfile:
@@ -46,10 +45,12 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
                 row = row.split()
 
             if row[0] == 'gfc':
+                if 'clm' not in dir():
+                    raise ValueError("max_degree header must appear before gfc data lines")
                 l = int(row[1])
                 m = int(row[2])
-                clm[l,m] = row[3]
-                slm[l,m] = row[4]
+                clm[l,m] = float(row[3])
+                slm[l,m] = float(row[4])
             elif row[0] == 'max_degree':
                 lmax = int(row[1])
                 type(lmax)
@@ -63,17 +64,17 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
                 gm = float(row[1])
 
 
-    return clm, slm, {'prodcut':product,'r0':r0, 'GM':gm, 'lmax':lmax}
+    return clm, slm, {'product':product,'r0':r0, 'GM':gm, 'lmax':lmax}
 
 def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
-    """Derive Gravatational Potential
+    """Derive Gravitational Potential
 
-    Derive all values need for potential derivation then pass them
+    Derive all values needed for potential derivation then pass them
     to _get_potential_numba_core which uses Numba and JIT to perform
-    the derivation faster, namely the sum of the double for loop
+    the derivation faster, namely the sum of the double for loop.
 
-    The units of r, gm, and r0 should be consitent. For example if r is
-    meters the r0 should be in meters and GM in m^3/s^2
+    The units of r, gm, and r0 should be consistent. For example if r is
+    in meters then r0 should be in meters and GM in m^3/s^2.
 
     Parameters
     ----------
@@ -97,7 +98,7 @@ def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     Returns
     -------
     float
-        Gravatation Potential (length^2/s^2)
+        Gravitational Potential (length^2/s^2)
     """
     # Get normalized Legendre functions at the target latitude
     # Note: 'geodesy' normalization is required for EGM96
@@ -132,7 +133,7 @@ def _get_potential_numba_core(lmax, rad_ratio, p_normalized,
     rad_ratio : float
         Ratio between position and body radius.
     p_normalized : float
-        Normalized legedre coeffecients
+        Normalized Legendre coefficients
     clm_arr : 2D array float
         _C_lm coeffecients.
     slm_arr : 2D array float

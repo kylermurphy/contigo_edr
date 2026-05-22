@@ -154,7 +154,4 @@ class SolarSystemEnvironment:
             self._cache[t] = r_new[:, i, :]
 
     def _check_times(self, ephem_time, gps_time, utc_time):
-        if isinstance(ephem_time, type(None)) and isinstance(gps_time, type(None)) and isinstance(utc_time, type(None)):
-            return False
-        else:
-            return True
+        return not (ephem_time is None and gps_time is None and utc_time is None)

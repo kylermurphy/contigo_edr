@@ -10,7 +10,6 @@ import zipfile
 import gzip
 import io
 
-from os import path
 from datetime import datetime
 from dateutil import tz
 from tqdm import tqdm
