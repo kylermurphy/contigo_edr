@@ -149,9 +149,9 @@ class EDRDensity:
             delta_den = denom[id1] - denom[id0]
 
             efd_sat = -2*delta_edr/delta_den
-            efd_t = self.constellation[sc_id].sc_utc[id0[0:i]] + \
-                    (self.constellation[sc_id].sc_utc[id1[0:i]] - \
-                    self.constellation[sc_id].sc_utc[id0[0:i]])/2.
+            efd_t = self.constellation[sc_id].sc_utc[id0] + \
+                    (self.constellation[sc_id].sc_utc[id1] - \
+                    self.constellation[sc_id].sc_utc[id0])/2.
 
             if smth_den is not None:
                 efd_sat = pd.Series(efd_sat).rolling(smth_den, min_periods=1, 
