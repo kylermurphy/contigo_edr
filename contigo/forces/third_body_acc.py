@@ -2,21 +2,13 @@
 
 added: 17/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
-import posixpath
-import urllib.parse
 import logging
-
-from os import path
-from datetime import datetime, timezone
-from dateutil import tz
+from datetime import timezone
 
 import pandas as pd
 import numpy as np
 import numpy.typing as npt
 import spiceypy as spice
-
-import contigo.contigo_utils.utils as utils
-import contigo.config as config
 
 from contigo.ephemeris.spice_ephem import SPICEEphem
 from contigo.forces.base import ForceModel
@@ -192,83 +184,6 @@ class ThirdBodyAcc:
         return self.bd_ecef
 
 
-class ThirdBody():
-    """
-    Third-body gravity force operating on invdividual satellites in a Constellation
-    object.
-    """
-
-    name: str = "ThirdBodyAcceleration"
-
-    def __init__(self,
-                 body=None,
-                 GM=None,
-                 ephemeris: str = "de440s",):
-        """Third body gravity acting on individual satellites in a Constellation
-        
-        Parameters
-        ----------
-        body : npt.ArrayLike, optional
-            A list of bodies for which to calculate accelerations at the location 
-            of a spacecraft (spos), by default ['SUN'].
-        GM : npt.ArrayLike | None, optional
-            Mass parameters for the bodies in body. Should be in the same order as body.
-            If nothing is passed they are loaded from the constants module which uses
-            JPLs de440 mass parameters, by default None.
-        ephemeris : str, optional
-            JPL SPICE ephemeris file to use; allowed values are de440 and de440s. 's'
-            denotes the smaller version which covers a shorter time frame. By default 
-            'de440s'
-
-        """        
-        self.body = body
-        self.GM = GM
-        self.ephemeris = ephemeris
-
-    def acceleration(self, 
-                     constellation: Constellation
-                     ) -> dict[str, npt.NDArray[np.float64]]:
-        """Derive third body accellerations.
-
-        Use ThirdBodyAcc to derive accelerations for satellites in a Constellation 
-        object.
-
-        Constellation holds the state and time scale of all satellites.
-
-        Initialization defines the ephemeris to use and the solar system bodies
-
-        Parameters
-        ----------
-        constellation : Constellation
-            Constellation container of Spacecraft objects.
-
-        Returns:
-            dict[spacecraft_id] -> (N,3)
-        """
-
-        acc_dict = {}
-
-        for sc_id, sc in constellation.spacecraft.items():
-
-            tba = ThirdBodyAcc(
-                spos=sc.state_ecef[:, 0:3],
-                stime=sc.stime,
-                body=self.body,
-                GM=self.GM,
-                scale=sc.tscale,
-                ephemeris=self.ephemeris,
-            )
-
-            tba.calc_tba()
-            acc_dict[sc_id] = tba.get_tba()
-
-        return acc_dict
-
-    def potential(self, 
-                  constellation: Constellation
-                  ) -> dict[str, npt.NDArray[np.float64]]:
-        raise NotImplementedError("Not implemented for ThirdBodyAcc.")
-    
 class ThirdBodyEnv(ForceModel):
     """
     Third-body gravity force operating on invdividual satellites in a Constellation
