@@ -11,8 +11,7 @@ import contigo.config as config
 
 from contigo.forces.base import ForceModel
 
-from .grav_utils import read_icgem_coeff
-from .grav_utils import get_potential
+from .grav_utils import read_icgem_coeff, get_potential_batch
 from contigo.constellation import Constellation
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
@@ -148,9 +147,9 @@ class GravPot:
         if len(self.r) != len(self.lat) or len(self.r) != len(self.lon):
             raise ValueError('r, lat, and lon must be same length')
 
-        self.gravpot = np.array([get_potential(rr, rlat, rlon,
-                    self.clm, self.slm, self.GM, self.r0, lmax=self.lmax)
-                    for rr, rlat, rlon in zip(self.r,self.lat,self.lon)])
+        self.gravpot = get_potential_batch(
+            self.r, self.lat, self.lon,
+            self.clm, self.slm, self.GM, self.r0, lmax=self.lmax)
 
     def get_pot(self):
         """Return Potential.
