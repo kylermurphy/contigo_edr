@@ -35,6 +35,7 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
     ---------
     https://icgem.gfz.de/
     """
+    product = r0 = gm = lmax = None
     with open(file_path, "r", encoding=encoding) as potfile:
         #reader = csv.reader(potfile, delimiter=" ", skipinitialspace=True)
         for line in potfile:
@@ -63,6 +64,8 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
             elif row[0] == 'earth_gravity_constant':
                 gm = float(row[1])
 
+    if any(v is None for v in [product, r0, gm, lmax]):
+        raise ValueError(f"ICGEM file missing required header fields in {file_path}")
 
     return clm, slm, {'product':product,'r0':r0, 'GM':gm, 'lmax':lmax}
 

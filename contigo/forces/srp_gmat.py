@@ -213,7 +213,7 @@ class SRPAcc(ForceModel):
         for sc_id, sc in constellation.spacecraft.items():
 
             srp = SRPGMATAcc(sc_state=sc.state_ecef / 1000.0,  # m → km for GMAT
-                             sc_time=sc.time,
+                             sc_time=sc.sc_utc,
                              sc_cr=sc.cr_arr,
                              sc_srparea=sc.srp_area_arr,
                              sc_mass=sc.sc_mass_arr,

@@ -134,7 +134,7 @@ class EDRDensity:
             s = sc_utc[0]
             e = s + window
 
-            while e < sc_utc[-1]:
+            while e <= sc_utc[-1]:
                 i0 = np.searchsorted(sc_utc, s, side='left')
                 i1 = np.searchsorted(sc_utc, e, side='left') - 1
                 id0_list.append(i0)

@@ -35,7 +35,7 @@ def spice_time(stime: npt.ArrayLike, tscale: str, out_scale: str):
         #t_str = pd.to_datetime(np.array(stime)).strftime('%d %b %Y %H:%M:%S.%f')
         #et_t = np.array([spice.utc2et(sp_in) for sp_in in t_str])
         et_t = spice.datetime2et(stime) 
-        if out_scale not in {'ET','TBD'}:
+        if out_scale not in {'ET','TDB'}:
             out_t = np.array([spice.unitim(sp_in,'ET',out_scale) for sp_in in et_t]) 
         else:
             out_t = et_t
@@ -56,7 +56,7 @@ def check_lpsk( ):
 
     sp_kcnt = spice.ktotal('ALL')
     sp_loaded = [spice.kdata(i,'ALL')[0] for i in range(sp_kcnt)]
-    if path.exists(lp_kernel) and [lp_kernel] not in sp_loaded:
+    if path.exists(lp_kernel) and lp_kernel not in sp_loaded:
         spice.furnsh(lp_kernel) # need to check if kernels are loaded
     else:
         base_url = 'https://naif.jpl.nasa.gov'

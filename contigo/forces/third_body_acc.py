@@ -152,7 +152,7 @@ class ThirdBodyAcc:
 
         et = np.array(et)
 
-        _, bd_ecef = ephem(body=self.body,et=et)
+        bd_ecef = ephem(body=self.body,ephem_time=et)
 
         bd_acc = tba_pairwise_numba(self.spos, bd_ecef, self.GM)
 

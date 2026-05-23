@@ -33,7 +33,7 @@ class EphemerisProvider(Protocol):
                  utc_time: np.ndarray | None = None,
                  gps_time: None = None,
                  ephem_time: None = None,
-                ) -> tuple[np.ndarray, np.ndarray]:
+                ) -> np.ndarray:
         """
         Compute positions of celestial bodies.
 

@@ -100,8 +100,10 @@ class SolarSystemEnvironment:
         self._load_times(sp_et, sp_gps, sp_utc)
 
         key = self._quantize(sp_gps)
-        r_out = np.array(itemgetter(*key)(self._cache))
-        r_out = np.swapaxes(r_out,0,1)
+        values = itemgetter(*key)(self._cache)
+        if len(key) == 1:
+            values = (values,)  # wrap bare value in tuple
+        r_out = np.swapaxes(np.array(values), 0, 1)
 
         return sp_et, sp_gps, sp_utc, r_out
 
