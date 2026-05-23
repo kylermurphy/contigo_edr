@@ -3,8 +3,8 @@ import posixpath
 import urllib.parse
 import logging
 
+import os
 
-from os import path
 
 import pandas as pd
 import numpy as np
@@ -52,13 +52,13 @@ def check_lpsk( ):
     # get the leapsecond kernel and make sure it's
     # loaded, download it if we don't have it
     leaps_f = config.LEAP_FILE
-    lp_kernel = path.join(config.DATA_DIR,leaps_f)
+    lp_kernel = os.path.join(config.DATA_DIR,leaps_f)
 
     sp_kcnt = spice.ktotal('ALL')
-    sp_loaded = [spice.kdata(i,'ALL')[0] for i in range(sp_kcnt)]
-    if path.exists(lp_kernel) and lp_kernel not in sp_loaded:
+    sp_loaded = [os.path.basename(spice.kdata(i,'ALL')[0]) for i in range(sp_kcnt)]
+    if os.path.exists(lp_kernel) and leaps_f not in sp_loaded:
         spice.furnsh(lp_kernel) # need to check if kernels are loaded
-    else:
+    elif leaps_f not in sp_loaded:
         base_url = 'https://naif.jpl.nasa.gov'
         base_pth = '/pub/naif/generic_kernels'
         leaps_d = 'lsk'
