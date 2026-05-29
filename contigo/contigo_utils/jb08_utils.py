@@ -52,6 +52,70 @@ _SW_NAMES = ('f10', 'f10b', 's10', 's10b', 'xm10', 'xm10b', 'y10', 'y10b', 'dstd
 
 _VALID_COORDS = {'ecef', 'geodetic'}
 
+# JB2008 minimum altitude threshold (metres) enforced by Orekit.
+_JB2008_ALT_MIN_M = 90_000.0
+
+
+def _validate_geodetic(positions: npt.NDArray[np.float64]) -> None:
+    """Sanity-check geodetic positions and raise a helpful error on common mistakes.
+
+    Expected column layout: [lat_deg, lon_deg, alt_m].
+    Checks performed:
+      - Latitude  (col 0): must be within [-90, 90] degrees.
+      - Longitude (col 1): must be within [-180, 360] degrees.
+      - Altitude  (col 2): must be in metres and above the JB2008 minimum
+        (90,000 m).  Values that look like km (< 2,000) or like ECEF Cartesian
+        components (|alt| > 1,000,000) trigger specific guidance.
+    """
+    lat = positions[:, 0]
+    lon = positions[:, 1]
+    alt = positions[:, 2]
+
+    if np.any(np.abs(lat) > 90.0):
+        bad = lat[np.abs(lat) > 90.0]
+        raise ValueError(
+            f"geodetic latitude (column 0) must be in [-90, 90] degrees. "
+            f"Found values outside that range: min={bad.min():.3f}, max={bad.max():.3f}. "
+            f"Check that your column order is [lat_deg, lon_deg, alt_m]."
+        )
+
+    if np.any((lon < -180.0) | (lon > 360.0)):
+        bad = lon[(lon < -180.0) | (lon > 360.0)]
+        raise ValueError(
+            f"geodetic longitude (column 1) must be in [-180, 360] degrees. "
+            f"Found values outside that range: min={bad.min():.3f}, max={bad.max():.3f}. "
+            f"Check that your column order is [lat_deg, lon_deg, alt_m]."
+        )
+
+    alt_min, alt_max = float(alt.min()), float(alt.max())
+
+    if alt_min < _JB2008_ALT_MIN_M:
+        # Altitude in km? Values for LEO are typically 200–2000 km.
+        if alt_max < 2_000.0:
+            hint = (
+                f"Altitude values look like they may be in km "
+                f"(min={alt_min:.1f}, max={alt_max:.1f}). "
+                f"Multiply by 1000 to convert to metres."
+            )
+        # ECEF Cartesian z passed as altitude? Magnitudes ~Earth radius (6.4e6 m).
+        elif np.any(np.abs(alt) > 1_000_000.0):
+            hint = (
+                f"Altitude values have magnitudes > 1,000,000 m "
+                f"(min={alt_min:.1f}, max={alt_max:.1f}), which suggests "
+                f"ECEF Cartesian coordinates were passed instead of geodetic. "
+                f"Use coords='ecef' for [x, y, z] input."
+            )
+        else:
+            hint = (
+                f"Altitude (column 2) min={alt_min:.1f} m is below the "
+                f"JB2008 minimum of {_JB2008_ALT_MIN_M:.0f} m. "
+                f"Check that altitude is in metres and the column order is "
+                f"[lat_deg, lon_deg, alt_m]."
+            )
+        raise ValueError(
+            f"Invalid geodetic altitude for JB2008: {hint}"
+        )
+
 
 def jb2008_density(
     positions: npt.NDArray[np.float64],
@@ -172,6 +236,9 @@ def jb2008_density(
         raise ValueError(
             f"positions must have shape (N, 3), got {positions.shape}"
         )
+
+    if geodetic:
+        _validate_geodetic(positions)
 
     # Build Orekit AbsoluteDate from the first epoch, then express all
     # subsequent epochs as second offsets from it.
