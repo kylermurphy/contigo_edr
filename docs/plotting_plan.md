@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft v1, open for comment |
-| **Lead / reviewer** | Kyle Murphy |
+| **Lead / reviewer** | Kyle Murphy (reviews PRs within 24 hours) |
 | **Implementer** | Research developer (name TBD) |
 | **Branch** | `claude/contigo-plotting-module-plan-9o6mrd` (plan only) |
 | **Scope** | Static (matplotlib) exploratory plots for `Spacecraft` and `Constellation` |
@@ -41,10 +41,11 @@ spacecraft.plot_altitude()                # works on a single Spacecraft too
 | D1 | **[DECISION]** Exploratory, static matplotlib | Fast, works in Colab, no extra servers. Interactive is a second plan. |
 | D2 | **[DECISION]** Altitude = WGS-84 geodetic height above the ellipsoid | Matches what `jb08_utils` and density models expect. |
 | D3 | **[DECISION]** Orbit plot is inertial (J2000) by default, Earth-fixed optional | An ECEF orbit is a spiral that hides the orbit shape. |
-| D4 | **[DECISION]** Geodetic and frame transforms are pure NumPy / SPICE, **not Orekit** | See benchmark below. Orekit adds JVM call overhead and is not needed. |
+| D4 | **[DECISION]** Geodetic conversion is pure NumPy; the ECEF to inertial transform uses SPICE (`sxform`), **not Orekit** | See benchmark and rationale below. Plotting must work without Java or network access. |
 | D5 | **[DECISION]** Basemap is plain matplotlib with a small bundled coastline file; Cartopy optional later | Cartopy is hard to install on some systems and Colab setups. |
 | D6 | **[DECISION]** Wrappers are flat methods (`sc.plot_altitude()`) | Simplest to learn. Revisit an accessor (`sc.plot.altitude()`) if plot count grows. |
-| D7 | **[DECISION]** Plan lives in `docs/` in the repo | Reviewable via PR; the implementer does not need other tools. |
+| D7 | **[DECISION]** Plan lives in `docs/` in the repo; docs site (`mkdocs`) comes later | Reviewable via PR; the implementer does not need other tools. |
+| D8 | **[DECISION]** Tests use small synthetic fixtures; the example notebook uses the new SPIRE cubesat dataset | Tests must not depend on large or yet-to-exist data. |
 
 ### Transform benchmark (supports D4)
 
@@ -61,6 +62,31 @@ than a few thousand points per spacecraft, so the SPICE loop costs well under a
 second even for hundreds of spacecraft. The geodetic conversion is fast enough to
 run on the full data when needed (altitude statistics), and decimation makes the
 plot cheap either way.
+
+### Why SPICE and not Orekit for the plotting transforms (D4)
+
+SPICE is already a hard dependency of the core: `Spacecraft` calls `spiceypy` for every time
+conversion (`sspice_et`, `sc_utc`) and `time_utils` loads the leap-second kernel. What is
+"less used" is `SPICEEphem` (the solar-system *ephemeris* provider). The plotting transform needs
+only the leap-second kernel and the Earth orientation kernel, which is a rotation, not an ephemeris.
+
+Orekit's strength here (ephemeris caching) does not help plotting: a plot needs one transform
+per decimated epoch, with nothing to reuse. Against it:
+
+- `start_orekit()` starts a JVM, queries the GitLab API for the latest orekit-data commit, and may
+  download data. A plot should not need Java or network access (think Colab cold starts).
+- Efficient use needs a new Java batch helper in `java_src/` (like `EphemerisBatchHelper`) and a
+  rebuilt, committed jar. That is a heavy ask for a first-time contributor.
+- Per-point calls through JPype are slow without such a helper.
+
+Keep the transform in **one function** (`ecef_to_inertial`) so an Orekit backend can be added later
+if EDR code needs frame consistency with Orekit's ITRF. No backend switch now.
+
+**Kernel coverage warning:** the bundled `earth_latest_high_prec.bpc` covers 2000-01-01 to
+**2026-05-30**. Newer data (e.g. 2026-06 onward) cannot be transformed with it. Task 0.3 therefore
+checks coverage (`spice.pckcov`), downloads the current kernel (reusing `SPICEEphem.dl_kernels`
+logic), and otherwise warns and falls back to the low-precision `IAU_EARTH` frame (error of order km, fine for
+a plot). Orekit has the same limit through its EOP data.
 
 ### Performance rule of thumb
 
@@ -170,7 +196,8 @@ checklist in Section 6 passes. One PR per task unless noted.
 |------|-------------|---------------------|
 | 0.1 | Packaging: replace `packages = ["contigo"]` with `[tool.setuptools.packages.find]` and `include = ["contigo*"]`; add `plot = ["matplotlib>=3.7"]` extra; add `tests/` with a trivial passing test | `pip install .` (non-editable) in a fresh env gives `import contigo.forces` working; `pytest` runs |
 | 0.2 | `contigo/contigo_utils/coords.py`: `ecef_to_geodetic` (vectorised), constants `WGS84_A`, `WGS84_F`, `WGS84_E2` into `constants.py` | Round-trip test vs forward formula < 1e-6 m; poles and equator tested; 1e6 points < 2 s |
-| 0.3 | Shared SPICE kernel helper `check_pck()` in `time_utils.py` (same pattern as `check_lpsk`); `ecef_to_inertial(state_ecef, et)` using `sxform('ITRF93','J2000')` | Test: a point fixed on Earth's surface has inertial speed ~ 465 m/s at the equator; round trip ECEF to inertial and back < 1e-6 m |
+| 0.3 | Shared SPICE kernel helper `check_pck()` in `time_utils.py` (same pattern as `check_lpsk`) that loads the PCK, checks coverage, downloads a newer one if needed, else warns and falls back to `IAU_EARTH`; `ecef_to_inertial(state_ecef, et)` using `sxform('ITRF93','J2000')` | Test: a point fixed on Earth's surface has inertial speed ~ 465 m/s at the equator; round trip ECEF to inertial and back < 1e-6 m; a date after 2026-05-30 either works (downloaded kernel) or warns and falls back |
+| 0.5 | GitHub Actions workflow (lead): `ruff check` and `pytest` on every PR, Python 3.10 and 3.12 | PR shows green/red checks; the workflow installs `.[dev,plot]` only (no Java/GMAT), so tests must not need the JVM |
 | 0.4 | `contigo/plotting/` skeleton: `_style.py`, `_util.py` (`as_spacecraft_dict`, `decimate`), empty `__init__.py`, CI-free smoke test using the `Agg` backend | `import contigo.plotting` works with and without matplotlib installed (clear error message when missing) |
 
 ### Phase 1: Altitude plot (implementer with close review, about 1-2 weeks)
@@ -182,7 +209,7 @@ This is the **template** for every later plot. Take your time, review it thoroug
 | 1.1 | `plotting/altitude.py` with `plot_altitude` (alt vs time, one line per spacecraft, km) | Works on a single `Spacecraft` and a `Constellation`; returns `(fig, ax)`; legend lists IDs; x-axis is dates |
 | 1.2 | Wrappers on `Spacecraft` and `Constellation` | Both call the same function; docstring links to it |
 | 1.3 | Tests: pure-data test (known ECEF to expected altitude), smoke test (figure created, number of lines = number of IDs) | `pytest tests/plotting` green |
-| 1.4 | Example cells in `notebooks/Plotting_Examples.ipynb` (with a "Open in Colab" badge) | Notebook runs top to bottom on `data/ESA_pod.hdf` |
+| 1.4 | Example cells in `notebooks/Plotting_Examples.ipynb` (with an "Open in Colab" badge) | Notebook runs top to bottom on the SPIRE cubesat dataset (**dependency:** Kyle supplies it; until then use `data/ESA_pod.hdf`) |
 
 ### Phase 2: Ground track and orbit plots (about 2-3 weeks)
 
@@ -421,9 +448,10 @@ in a `conftest.py` fixture rather than load the large HDF files.
 | R1 | SPICE kernels must be loaded for the inertial transform | Task 0.3 shared helper; clear error if the PCK is missing |
 | R2 | Plots with hundreds of spacecraft are visually unreadable | Default legend off above ~15 spacecraft; `ids=` subset; colormap by index |
 | R3 | `Spacecraft` with several IDs and unsorted time | Always go through `split_by_id()` (sorts per ID) |
-| R4 | Polar-motion / precession accuracy of SPICE ITRF93 is high only where the high-precision PCK covers the dates | Fall back with a warning for dates outside coverage |
+| R4 | Bundled Earth PCK ends 2026-05-30 (checked with `pckcov`); newer data fails to transform | Task 0.3: coverage check, download, `IAU_EARTH` fallback with warning; consider a periodic kernel refresh |
 | R5 | Bundled coastline licence | Use Natural Earth (public domain), downsample to under ~100 KB |
-| O1 | **[OPEN]** Who reviews PRs, and what turnaround do we expect? | |
-| O2 | **[OPEN]** Do we want CI (GitHub Actions running ruff + pytest) in Phase 0? Recommended. | |
-| O3 | **[OPEN]** Which dataset is the standard example (ESA_pod, CHAMP, or both)? | |
-| O4 | **[OPEN]** Docs site (`mkdocs`) in Phase 4 or defer? | |
+| O1 | ~~Reviewer / turnaround~~ | **Resolved:** Kyle, within 24 hours |
+| O2 | ~~CI~~ | **Resolved:** ruff + pytest, task 0.5, done by Kyle |
+| O3 | ~~Example dataset~~ | **Resolved:** new SPIRE cubesat dataset (Kyle to create); synthetic fixtures for tests |
+| O4 | ~~Docs site~~ | **Resolved:** later |
+| O5 | **[OPEN]** Which contributor takes Phase 1 and when does Phase 0 land? | |
