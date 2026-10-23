@@ -50,8 +50,8 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
                     raise ValueError("max_degree header must appear before gfc data lines")
                 l = int(row[1])
                 m = int(row[2])
-                clm[l,m] = float(row[3])
-                slm[l,m] = float(row[4])
+                clm[l,m] = float(row[3].upper().replace('D', 'e') if 'D' in row[3].upper() else row[3])
+                slm[l,m] = float(row[4].upper().replace('D', 'e') if 'D' in row[4].upper() else row[4])
             elif row[0] == 'max_degree':
                 lmax = int(row[1])
                 type(lmax)
