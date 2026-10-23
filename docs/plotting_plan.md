@@ -190,7 +190,7 @@ def plot_altitude(self, **kwargs):
 Each task lists **acceptance criteria**. A task is done when all of them are true **and** the PR
 checklist in Section 6 passes. One PR per task unless noted.
 
-### Phase 0: Foundations (lead developer, about 1 week)
+### Phase 0: Foundations (lead, about 1 week)
 
 | Task | Description | Acceptance criteria |
 |------|-------------|---------------------|
@@ -199,10 +199,29 @@ checklist in Section 6 passes. One PR per task unless noted.
 | 0.3 | Shared SPICE kernel helper `check_pck()` in `time_utils.py` (same pattern as `check_lpsk`) that loads the PCK, checks coverage, downloads a newer one if needed, else warns and falls back to `IAU_EARTH`; `ecef_to_inertial(state_ecef, et)` using `sxform('ITRF93','J2000')` | Test: a point fixed on Earth's surface has inertial speed ~ 465 m/s at the equator; round trip ECEF to inertial and back < 1e-6 m; a date after 2026-05-30 either works (downloaded kernel) or warns and falls back |
 | 0.5 | GitHub Actions workflow (lead): `ruff check` and `pytest` on every PR, Python 3.10 and 3.12 | PR shows green/red checks; the workflow installs `.[dev,plot]` only (no Java/GMAT), so tests must not need the JVM |
 | 0.4 | `contigo/plotting/` skeleton: `_style.py`, `_util.py` (`as_spacecraft_dict`, `decimate`), empty `__init__.py`, CI-free smoke test using the `Agg` backend | `import contigo.plotting` works with and without matplotlib installed (clear error message when missing) |
+| 0.5 | New SPIRE ECEF/GPS dataset | Load with pandas and readinto `Spacecraft` or `Constellation` |
 
-### Phase 1: Altitude plot (implementer with close review, about 1-2 weeks)
 
-This is the **template** for every later plot. Take your time, review it thoroughly, then repeat.
+
+### Phase 1: Altitude plot (implementer close review)
+
+This is the **template** for every later plot. Take your time, review it, then repeat.
+
+The smoke test is a quick, shallow test that checks the code runs at all without crashing. 
+It doesn’t check that the answer is right. A smoke test of plot_altitude would build a small 
+synthetic constellation, call the function, and check that it returned a figure with one line 
+per spacecraft. It would catch a typo, a wrong import, or a crash on a Constellation input. 
+It would not catch an altitude that’s off by 6,378 km or in the wrong units, because it 
+never checks the numbers.
+
+I've (Kyle) always found tests difficult with research code. I've found Claude helpful for
+suggesting simple tests. 
+
+```python
+def test_plot_altitude_runs(constellation_fixture):
+    fig, ax = plot_altitude(constellation_fixture)
+    assert len(ax.lines) == len(constellation_fixture)
+```
 
 | Task | Description | Acceptance criteria |
 |------|-------------|---------------------|
@@ -211,11 +230,11 @@ This is the **template** for every later plot. Take your time, review it thoroug
 | 1.3 | Tests: pure-data test (known ECEF to expected altitude), smoke test (figure created, number of lines = number of IDs) | `pytest tests/plotting` green |
 | 1.4 | Example cells in `notebooks/Plotting_Examples.ipynb` (with an "Open in Colab" badge) | Notebook runs top to bottom on the SPIRE cubesat dataset (**dependency:** Kyle supplies it; until then use `data/ESA_pod.hdf`) |
 
-### Phase 2: Ground track and orbit plots (about 2-3 weeks)
+### Phase 2: Ground track and orbit plots
 
 | Task | Description | Acceptance criteria |
 |------|-------------|---------------------|
-| 2.1 | `plot_ground_track`: lon/lat on a plain map with bundled coastline, lines **broken at the antimeridian** (insert NaN when `abs(dlon) > 180`), optional `color_by=` (time or altitude) | No horizontal streaks across the map; lat limits visible so inclination can be read; ground track of an ~87 deg inclination spacecraft (CHAMP) visibly reaches ±87 |
+| 2.1 | `plot_ground_track`: lon/lat on a plain map with bundled coastline, lines **broken at the antimeridian** (insert NaN when `abs(dlon) > 180`), optional `color_by=` (time or altitude) | No horizontal streaks across the map; lat limits visible so inclination can be read; ground track of an ~87 deg inclination spacecraft (CHAMP) visibly reaches ±87. **Andreas had a really cool version of this plot in his last presentation**. |
 | 2.2 | Wrappers + tests + notebook cells | As Phase 1 |
 | 2.3 | `plot_orbit`: 3-D axes, Earth sphere (or oblate ellipsoid), orbit lines in J2000, `frame='inertial'` (default) or `'ecef'` | Equal-aspect 3-D axes; a circular orbit plots as a circle; `frame='ecef'` shows the spiral |
 | 2.4 | Wrappers + tests + notebook cells | As Phase 1 |
@@ -224,7 +243,7 @@ This is the **template** for every later plot. Take your time, review it thoroug
 
 | Task | Plot | Why it matters |
 |------|------|----------------|
-| 3.1 | `plot_coverage`: timeline bar per spacecraft with gaps | Instant data-quality check for multi-satellite data |
+| 3.1 | `plot_coverage`: timeline bar per spacecraft with gaps | Instant data-quality check for multi-satellite data, kind of like a Gantt chart. |
 | 3.2 | `plot_lst_lat`: local solar time vs latitude | Standard way to show density-sampling coverage |
 | 3.3 | `plot_elements`: a, e, i, RAAN vs time (osculating, from the inertial state) | The proper inclination-vs-time plot |
 | 3.4 | `plot_separation`: relative distance between spacecraft pairs | Constellation geometry |
@@ -235,44 +254,151 @@ README plotting section, docstring review, example gallery notebook, optional `m
 
 ### Later plans (not in this plan)
 
-- Interactive plots (Plotly), second plan.
+- Interactive plots (Plotly) and a plot dashboard, second plan.
 - Plots of `EDRDensity` results (EDR/EFD time series and maps), another phase.
 
 ---
 
 ## 5. Getting started: workflow for a new contributor
 
+We work with **branches in the main repository**: you get write access, create a branch for
+each task, and open a pull request (PR) into `main`. You cannot push directly to `main`; every
+change is reviewed first (see 5.4). 
+
 ### 5.1 One-time setup
+
+You need three things: a copy of the repository on your computer, a Python environment, and
+a check that the tests pass. Pick **one** of the ways to get the repository (A or B). Option C
+is for small edits only. Then do the Python setup, which is the same for everyone.
+
+**Before you start:** install [Python 3.10 or newer](https://www.python.org/downloads/),
+[Git](https://git-scm.com/downloads), and [VS Code](https://code.visualstudio.com/) with its
+Python extension. Ask the lead to confirm you have write access to the repository (see 5.4).
+
+#### A. Command line
 
 ```bash
 git clone https://github.com/kylermurphy/contigo_edr.git
 cd contigo_edr
-python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
-pip install -e ".[dev,plot]"
-pytest                                                # should pass before you change anything
 ```
+
+Tell git who you are (once per computer):
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+#### B. GitHub Desktop (graphical, no commands)
+
+1. Install [GitHub Desktop](https://desktop.github.com/) and sign in with your GitHub account
+   (**File > Options > Accounts**, or **GitHub Desktop > Settings** on macOS).
+2. Set your name and email under **Options > Git** (use the same email as your GitHub account).
+3. Choose **File > Clone repository**, select the **URL** tab, enter
+   `kylermurphy/contigo_edr`, pick a local folder you will remember, and click **Clone**.
+4. To work on the code, click **Repository > Open in Visual Studio Code**
+   (or **Open in Terminal** for the Python setup below).
+
+#### C. GitHub in the browser (small edits only)
+
+On any repository page, press the `.` key (or change `github.com` to `github.dev` in the address) to
+open the web editor. You can read files and make small edits, such as to documentation, and
+commit them to a branch. You **cannot** run Python, black, ruff, or pytest in it, so use A or B for
+all code tasks. (GitHub Codespaces, a full cloud development environment, also works if the lead
+enables it, but it is not required.)
+
+#### Python environment (everyone, from the repository folder)
+
+Open a terminal in the repository folder (in VS Code: **Terminal > New Terminal**).
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows (PowerShell): .venv\Scripts\Activate.ps1
+pip install -e ".[dev,plot]"
+pytest                             # should pass before you change anything
+```
+
+In VS Code, press **Ctrl+Shift+P** (Cmd+Shift+P on macOS), run **Python: Select Interpreter**, and
+choose the `.venv` environment so the editor uses it.
+
+If `pip install` fails (the full install includes Orekit and Java dependencies and can be slow or
+fail on some systems), stop and ask, not everything has been tested and we should work through this; do not work around it silently.
+
+#### GitHub Desktop equivalents for the steps in 5.2
+
+If you use GitHub Desktop, use these buttons in place of the git commands in 5.2. The Python
+checks (`black`, `ruff`, `pytest`) still run in the terminal.
+
+| Step in 5.2 | Command line | GitHub Desktop |
+|---|---|---|
+| Update `main` | `git checkout main && git pull` | Set **Current Branch** to `main`, then click **Fetch origin** and **Pull origin** |
+| Create a branch | `git checkout -b plot/altitude` | **Current Branch > New Branch**, name it, base it on `main` |
+| Commit | `git add ... && git commit -m "..."` | Tick the changed files, write a summary, click **Commit to <branch>** |
+| Push the branch | `git push -u origin plot/altitude` | Click **Publish branch** (later: **Push origin**) |
+| Open a PR | follow the link printed by `git push` | Click **Create Pull Request** (opens GitHub in the browser) |
+| After the merge | `git checkout main && git pull && git branch -d plot/altitude` | Switch to `main`, **Pull origin**, then **Branch > Delete** the old branch |
+| See what changed | `git diff` | The **Changes** tab shows every edited file with a before/after view |
 
 ### 5.2 For every task
 
-1. **Pick one task** from Section 4 and tell the lead you are starting it.
-2. **Branch from `main`**: `git checkout main && git pull && git checkout -b plot/altitude`
-3. **Make small commits** with clear messages: `Add ecef_to_geodetic with tests`.
+1. **Pick one task** from Section 4 and tell people  you are starting it.
+2. **Start from an up-to-date `main`, then create a branch** named for the task:
+   ```bash
+   git checkout main
+   git pull
+   git checkout -b plot/altitude        # use a short, descriptive name
+   ```
+3. **Make small commits** with clear messages, for example `Add ecef_to_geodetic with tests`:
+   ```bash
+   git add path/to/changed_file.py
+   git commit -m "Add ecef_to_geodetic with tests"
+   ```
 4. **Check before pushing:**
    ```bash
    black contigo tests          # formatting
    ruff check contigo tests     # lint
    pytest                       # tests
    ```
-5. **Push and open a pull request** into `main`. Fill in the checklist in Section 6.
-6. **Respond to review comments** by pushing more commits to the same branch. Do not squash or force-push while a review is open.
-7. After merge, delete the branch and start the next task from a fresh `main`.
+5. **Push your branch and open a pull request into `main`:**
+   ```bash
+   git push -u origin plot/altitude
+   ```
+   GitHub prints a link to open the PR. Fill in the checklist in Section 6. Automatic checks
+   (ruff and pytest) run on every PR; a red cross means something needs fixing before review.
+6. **Respond to review comments** by pushing more commits to the same branch. The PR updates
+   automatically. Do not squash or force-push while a review is open.
+7. **Review turnaround:** the lead reviews PRs within 24 hours. If you have heard nothing after
+   that, send a reminder.
+8. **After the PR is merged**, return to `main`, update it, and delete the old branch:
+   ```bash
+   git checkout main
+   git pull
+   git branch -d plot/altitude
+   ```
+   Start the next task from a fresh branch.
 
-### 5.3 Rules of thumb
+### 5.3 Working Rules
 
-- If you are stuck for more than about an hour, ask. Early questions are cheap.
+- One task per branch and one branch per PR. Do not stack unrelated changes together.
+- If you are stuck I'm generally around questions. Early questions are cheap.
 - Prefer a small PR (under ~300 changed lines) over a large one. Reviews are faster and bugs are easier to find.
-- Never commit data files, `.ipynb` outputs with huge images, or credentials. Clear notebook outputs before committing if they are large (`jupyter nbconvert --clear-output`).
+- If `git pull` or a merge reports a conflict, stop and ask before resolving it.
+- Never commit data files, notebook outputs with huge images, or credentials. Clear large outputs
+  before committing (`jupyter nbconvert --clear-output`).
 - A plot that "looks right" is not a test. Test the *numbers* going into the plot (Section 7).
+
+### 5.4 Repository setup (lead, one time)
+
+**
+
+1. Add the contributor under **Settings > Collaborators** with **Write** access.
+2. Protect `main` under **Settings > Branches > Add branch protection rule** (branch name `main`):
+   - Require a pull request before merging, with **1 approval**.
+   - Require status checks to pass (`ruff` and `pytest`) once CI (task 0.5) is in place.
+   - Do not allow direct pushes to `main`.
+3. In **Settings > General > Pull Requests**, enable **Automatically delete head branches** so merged
+   branches are cleaned up.
+
 
 ---
 
@@ -454,4 +580,4 @@ in a `conftest.py` fixture rather than load the large HDF files.
 | O2 | ~~CI~~ | **Resolved:** ruff + pytest, task 0.5, done by Kyle |
 | O3 | ~~Example dataset~~ | **Resolved:** new SPIRE cubesat dataset (Kyle to create); synthetic fixtures for tests |
 | O4 | ~~Docs site~~ | **Resolved:** later |
-| O5 | **[OPEN]** Which contributor takes Phase 1 and when does Phase 0 land? | |
+| O5 | **[OPEN]** Which contributor takes Phase 1 and when does Phase 0 land? | Kevin takes Phase 1, Kyle working on Phase 0 now |
