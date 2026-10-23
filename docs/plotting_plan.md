@@ -4,8 +4,8 @@
 |---|---|
 | **Status** | Draft v1, open for comment |
 | **Lead / reviewer** | Kyle Murphy (reviews PRs within 24 hours) |
-| **Implementer** | Research developer (name TBD) |
-| **Branch** | `claude/contigo-plotting-module-plan-9o6mrd` (plan only) |
+| **Implementer** | Kevin Delano |
+| **Branch** | `contigo-plotting-module-plan` (plan only) |
 | **Scope** | Static (matplotlib) exploratory plots for `Spacecraft` and `Constellation` |
 | **Out of scope (later plans)** | Interactive plots (Plotly), EDR/EFD result plots |
 
@@ -17,9 +17,9 @@
 
 ## 1. Goals
 
-Give CONTIGO users a fast way to *look at* their spacecraft data, so problems in
-the data (gaps, wrong units, wrong frame) are seen before they reach the EDR/EFD
-calculation. Phase 1 plots:
+Give CONTIGO users a fast way to *look at* their spacecraft data, so that the data can 
+be visualized and problems in the data (gaps, wrong units, wrong frame) are seen before 
+they reach the EDR/EFD calculation. Phase 1 plots:
 
 1. **Altitude** vs time
 2. **Ground track** (geographic map, shows the latitude extent / inclination)
@@ -88,18 +88,18 @@ checks coverage (`spice.pckcov`), downloads the current kernel (reusing `SPICEEp
 logic), and otherwise warns and falls back to the low-precision `IAU_EARTH` frame (error of order km, fine for
 a plot). Orekit has the same limit through its EOP data.
 
-### Performance rule of thumb
+### Performance
 
 "Hundreds of spacecraft" is fine if every plot function:
 
-- decimates to `max_points` per spacecraft (default 2000) **before** any transform,
+- decimates to `max_points` per spacecraft **(default 2000) before** any transform,
 - does the math vectorised over `(N, 3)` arrays, never a Python loop over points
   (the one exception is the per-epoch SPICE call, which is cheap after decimation),
 - draws one `Line2D` per spacecraft (or a `LineCollection`), never one per point.
 
 ---
 
-## 2. Findings from the existing codebase
+## 2. From the existing codebase
 
 These shape the design. Please read before starting.
 
