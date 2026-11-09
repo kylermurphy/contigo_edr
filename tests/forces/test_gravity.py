@@ -53,7 +53,8 @@ def primed_cache(monkeypatch, eigen2):
     clm, slm, meta = eigen2
     for key, val in {
         "pot_coef_loaded": True,
-        "pot_file": "EIGEN-2.gfc",
+        "pot_file": os.path.realpath(EIGEN2),
+        "pot_lmax": meta["lmax"],
         "pot_clm": clm,
         "pot_slm": slm,
         "pot_r0": meta["r0"],
@@ -68,6 +69,7 @@ def empty_cache(monkeypatch):
     """Empty potential cache, so GravPot reads the file (first-load path)."""
     monkeypatch.setitem(config.state, "pot_coef_loaded", False)
     monkeypatch.setitem(config.state, "pot_file", None)
+    monkeypatch.setitem(config.state, "pot_lmax", None)
 
 
 def _zero_coeffs(lmax):
@@ -212,15 +214,10 @@ def test_scalar_matches_batch(eigen2):
 # ---------------------------------------------------------------------------
 # FO-07 GravPot
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="F7/R7: get_pot returns None before calc_pot",
-)
 def test_gravpot_get_pot_before_calc_raises(primed_cache):
     """FO-07: ``get_pot()`` before ``calc_pot()`` raises ValueError."""
     gp = GravPot(pot_file="EIGEN-2.gfc", lmax=2)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="call calc_pot"):
         gp.get_pot()
 
 
@@ -229,7 +226,8 @@ def test_gravpot_lmax_clamped_on_first_load(empty_cache):
     gp = GravPot(pot_file="EIGEN-2.gfc", lmax=500)
     assert gp.lmax == EIGEN2_LMAX
     assert config.state["pot_coef_loaded"] is True
-    assert config.state["pot_file"] == "EIGEN-2.gfc"
+    assert config.state["pot_file"] == os.path.realpath(EIGEN2)
+    assert config.state["pot_lmax"] == EIGEN2_LMAX
 
 
 def test_gravpot_second_instance_uses_cache(empty_cache):
@@ -244,22 +242,85 @@ def test_gravpot_second_instance_uses_cache(empty_cache):
     assert second.slm is first.slm
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="F7/R7: lmax not clamped on cached path",
-)
 def test_gravpot_lmax_clamped_on_cached_path(empty_cache):
     """FO-07: lmax is also clamped when coefficients come from config.state.
 
     The first GravPot fills the cache; the second (cached branch, verified by
     ``test_gravpot_second_instance_uses_cache``) must still clamp lmax to 140.
-    ``calc_pot`` is not called: with lmax 500 the Numba kernel would index
-    beyond the (141, 141) coefficient arrays without bounds checking.
+    Without the clamp, lmax 500 would make the Numba kernel index beyond the
+    (141, 141) coefficient arrays (now also rejected by get_potential_batch).
     """
     GravPot(pot_file="EIGEN-2.gfc", lmax=20)
     second = GravPot(pot_file="EIGEN-2.gfc", lmax=500)
     assert second.lmax == EIGEN2_LMAX
+
+
+def test_gravpot_cached_path_calc_pot_equals_fresh_load(empty_cache, monkeypatch):
+    """FO-07: calc_pot on the cached path (lmax clamped) equals a fresh load."""
+    GravPot(pot_file="EIGEN-2.gfc", lmax=20)  # fills the cache
+    cached = GravPot(
+        r=R_PTS, lat=LAT_PTS, lon=LON_PTS, pot_file="EIGEN-2.gfc", lmax=500
+    )
+    assert cached.lmax == EIGEN2_LMAX
+    cached.calc_pot()
+
+    monkeypatch.setitem(config.state, "pot_coef_loaded", False)
+    monkeypatch.setitem(config.state, "pot_file", None)
+    fresh = GravPot(r=R_PTS, lat=LAT_PTS, lon=LON_PTS, pot_file=EIGEN2, lmax=500)
+    assert fresh.clm is not cached.clm  # really re-read from the file
+    assert fresh.lmax == EIGEN2_LMAX
+    fresh.calc_pot()
+    np.testing.assert_array_equal(cached.get_pot(), fresh.get_pot())
+
+
+def test_gravpot_same_basename_different_files_not_shared(tmp_path, empty_cache):
+    """FO-07: the cache is keyed on the full path, not the basename.
+
+    Two copies of EIGEN-2.gfc in different directories, with C20 changed in
+    the second, must each get their own coefficients.
+    """
+    with open(EIGEN2, encoding="ISO-8859-1") as fh:
+        text = fh.read()
+    old = "-.484165815935e-03"
+    assert old in text
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    fa = tmp_path / "a" / "EIGEN-2.gfc"
+    fb = tmp_path / "b" / "EIGEN-2.gfc"
+    fa.write_text(text, encoding="ISO-8859-1")
+    fb.write_text(text.replace(old, "-.500000000000e-03", 1), encoding="ISO-8859-1")
+
+    ga = GravPot(pot_file=str(fa), lmax=2)
+    gb = GravPot(pot_file=str(fb), lmax=2)
+    assert ga.clm[2, 0] == EIGEN2_C20
+    assert gb.clm[2, 0] == -0.5e-03
+    assert config.state["pot_file"] == os.path.realpath(fb)
+    # and back to a: the cache now holds b, so a is re-read, not shared
+    ga2 = GravPot(pot_file=str(fa), lmax=2)
+    assert ga2.clm[2, 0] == EIGEN2_C20
+
+
+def test_batch_lmax_beyond_arrays_raises():
+    """R7: lmax above the coefficient arrays -> ValueError, not an OOB read."""
+    clm, slm = _zero_coeffs(2)
+    with pytest.raises(ValueError, match="lmax=3"):
+        get_potential_batch(
+            R_PTS, LAT_PTS, LON_PTS, clm, slm, EIGEN2_GM, EIGEN2_R0, lmax=3
+        )
+    with pytest.raises(ValueError, match="lmax=500"):
+        get_potential(
+            R_PTS[0], LAT_PTS[0], LON_PTS[0], clm, slm, EIGEN2_GM, EIGEN2_R0, lmax=500
+        )
+
+
+def test_batch_mismatched_coefficient_shapes_raises():
+    """R7: clm and slm of different shapes -> ValueError."""
+    clm, _ = _zero_coeffs(3)
+    _, slm = _zero_coeffs(2)
+    with pytest.raises(ValueError, match="same shape"):
+        get_potential_batch(
+            R_PTS, LAT_PTS, LON_PTS, clm, slm, EIGEN2_GM, EIGEN2_R0, lmax=2
+        )
 
 
 def test_gravpot_missing_file_raises(tmp_path, empty_cache):
