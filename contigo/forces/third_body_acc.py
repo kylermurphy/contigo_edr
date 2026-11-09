@@ -158,8 +158,9 @@ class ThirdBodyAcc:
         # to SPICE ET Ephemeris time (in the SPICE system,
         # this is equivalent to TDB time)
         if self.stime.tzinfo is not None and self.stime.tzinfo != timezone.utc:
-            print(str(self.stime.tzinfo))
-            raise ValueError("stime should be time zone naive or UTC")
+            raise ValueError(
+                f"stime should be time zone naive or UTC, got {self.stime.tzinfo}"
+            )
 
         ephem = SPICEEphem(ephemeris=self.ephemeris)
 
