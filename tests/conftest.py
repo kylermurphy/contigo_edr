@@ -21,19 +21,19 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Callable
 
 import numpy as np
 import pandas as pd
 import pytest
-import spiceypy as spice
 from _support import (  # noqa: E402
     ESA_PROPS,
     MULTI_MEMBERS,
     FakeProvider,
+    load_bundled_kernels,
     make_circular_orbit,
+    make_esa_constellation,
 )
 
 import contigo.config as config
@@ -90,12 +90,7 @@ def spice_offline() -> None:
     times on first use. Kernels are furnished with the same path strings that
     ``SPICEEphem`` builds, so it recognises them as already loaded.
     """
-    loaded = {spice.kdata(i, "ALL")[0] for i in range(spice.ktotal("ALL"))}
-    for fname in (config.LEAP_FILE, config.PCK_FILE, "de440s.bsp"):
-        path = os.path.join(config.DATA_DIR, fname)
-        if path not in loaded:
-            spice.furnsh(path)
-    config.state["kernel_downloaded"] = True
+    load_bundled_kernels()
 
 
 @pytest.fixture(autouse=True)
@@ -223,13 +218,4 @@ def esa_constellation(esa_pod_small: pd.DataFrame) -> Constellation:
     ``CONTIGO_Colab.ipynb``: Cd 3.5, drag area 1.1 m^2, mass 430 kg, Cr 1.8,
     SRP area 1 m^2.
     """
-    df = esa_pod_small
-    sc = Spacecraft(
-        state=df[["x", "y", "z", "vx", "vy", "vz"]].to_numpy(),
-        time=df["DateTime"],
-        sc_id_input=np.full(len(df), "ESA"),
-        tscale_input="GPS",
-        unit_input="km",
-        **ESA_PROPS,
-    )
-    return Constellation(spacecraft=sc)
+    return make_esa_constellation(esa_pod_small)

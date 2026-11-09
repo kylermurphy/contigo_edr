@@ -8,12 +8,17 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
+import spiceypy as spice
 
+import contigo.config as config
 from contigo.constellation import Constellation
 from contigo.contigo_utils.constants import WGS84_EARTH_ANGULAR_VELOCITY, jpl_de440
+from contigo.spacecraft import Spacecraft
 
 #: Earth GM (m^3/s^2) and rotation rate (rad/s) used by the synthetic orbits.
 #: OMEGA must be the value EDRDensity uses, or the Jacobi integral drifts.
@@ -86,6 +91,38 @@ def make_circular_orbit(
     state = np.hstack([rot(r_i), rot(v_rel)])
     time = pd.date_range(t0, periods=n, freq=pd.Timedelta(seconds=dt))
     return state, time
+
+
+def load_bundled_kernels() -> None:
+    """Furnish the bundled SPICE kernels and mark the NAIF download as done.
+
+    ``SPICEEphem.load_kernels`` otherwise asks NAIF for file modification
+    times on first use. Kernels are furnished with the same path strings that
+    ``SPICEEphem`` builds, so it recognises them as already loaded.
+    """
+    loaded = {spice.kdata(i, "ALL")[0] for i in range(spice.ktotal("ALL"))}
+    for fname in (config.LEAP_FILE, config.PCK_FILE, "de440s.bsp"):
+        path = os.path.join(config.DATA_DIR, fname)
+        if path not in loaded:
+            spice.furnsh(path)
+    config.state["kernel_downloaded"] = True
+
+
+def make_esa_constellation(df: pd.DataFrame) -> Constellation:
+    """``Constellation`` with ID ``'ESA'`` in SI from an ESA POD table in km.
+
+    ``df`` has columns ``DateTime`` (GPS) and ``x, y, z, vx, vy, vz`` in km and
+    km/s; properties are ``ESA_PROPS``.
+    """
+    sc = Spacecraft(
+        state=df[["x", "y", "z", "vx", "vy", "vz"]].to_numpy(),
+        time=df["DateTime"],
+        sc_id_input=np.full(len(df), "ESA"),
+        tscale_input="GPS",
+        unit_input="km",
+        **ESA_PROPS,
+    )
+    return Constellation(spacecraft=sc)
 
 
 #: (id, altitude m, inclination deg, cd) of the members of ``sc_multi``
