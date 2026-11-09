@@ -159,11 +159,13 @@ def _pretend_nothing_loaded(monkeypatch) -> list[str]:
 def test_tu05_check_lpsk_furnishes_existing_file(tmp_path, monkeypatch):
     """TU-05: kernel present in DATA_DIR but not loaded is furnished, no download.
 
-    Source: branch ``os.path.exists(lp_kernel) and leaps_f not in sp_loaded``.
+    Source: ``kernels.ensure_kernel`` finds the bundled file (the cache is
+    empty), so ``dl_file`` is not called.
     """
     target = tmp_path / config.LEAP_FILE
     shutil.copy(os.path.join(config.DATA_DIR, config.LEAP_FILE), target)
     monkeypatch.setattr(config, "DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CONTIGO_CACHE_DIR", str(tmp_path / "cache"))
     downloads: list[tuple[str, str]] = []
     monkeypatch.setattr(utils, "dl_file", lambda url, fn: downloads.append((url, fn)))
     calls = _pretend_nothing_loaded(monkeypatch)
@@ -175,22 +177,27 @@ def test_tu05_check_lpsk_furnishes_existing_file(tmp_path, monkeypatch):
 
 
 def test_tu05_check_lpsk_downloads_missing_file(tmp_path, monkeypatch):
-    """TU-05: a missing kernel is downloaded from NAIF, then furnished.
+    """TU-05: a missing kernel is downloaded from NAIF into the cache, then furnished.
 
     The fake ``dl_file`` copies the bundled ``naif0012.tls`` into place and
-    records the URL. Expected URL: the NAIF generic_kernels/lsk location.
+    records the URL. Expected: the NAIF generic_kernels/lsk URL, written to
+    ``config.cache_dir("spice")`` (R16b), never to ``DATA_DIR``.
     """
     bundled = os.path.join(config.DATA_DIR, config.LEAP_FILE)
-    monkeypatch.setattr(config, "DATA_DIR", str(tmp_path))
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setattr(config, "DATA_DIR", str(data_dir))
+    monkeypatch.setenv("CONTIGO_CACHE_DIR", str(tmp_path / "cache"))
     downloads: list[tuple[str, str]] = []
 
     def fake_dl(url, filename):
         downloads.append((url, filename))
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
         shutil.copy(bundled, filename)
 
     monkeypatch.setattr(utils, "dl_file", fake_dl)
     calls = _pretend_nothing_loaded(monkeypatch)
-    expected = os.path.join(str(tmp_path), config.LEAP_FILE)
+    expected = str(tmp_path / "cache" / "spice" / config.LEAP_FILE)
     assert not os.path.exists(expected)
 
     check_lpsk()
@@ -198,3 +205,4 @@ def test_tu05_check_lpsk_downloads_missing_file(tmp_path, monkeypatch):
     assert downloads == [(LEAP_URL, expected)]
     assert calls == [expected]
     assert os.path.exists(expected)
+    assert os.listdir(data_dir) == []

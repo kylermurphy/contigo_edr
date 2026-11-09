@@ -8,15 +8,13 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
-import os
-
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-import spiceypy as spice
 
 import contigo.config as config
 from contigo.constellation import Constellation
+from contigo.contigo_utils import kernels
 from contigo.contigo_utils.constants import WGS84_EARTH_ANGULAR_VELOCITY, jpl_de440
 from contigo.spacecraft import Spacecraft
 
@@ -97,14 +95,16 @@ def load_bundled_kernels() -> None:
     """Furnish the bundled SPICE kernels and mark the NAIF download as done.
 
     ``SPICEEphem.load_kernels`` otherwise asks NAIF for file modification
-    times on first use. Kernels are furnished with the same path strings that
-    ``SPICEEphem`` builds, so it recognises them as already loaded.
+    times on first use. Kernels are resolved with
+    ``config.find_data_file(name, "spice")``, as ``SPICEEphem`` does, so it
+    recognises them as already loaded. The test session's cache dir is an
+    empty temp dir, so these are the bundled files in ``DATA_DIR``.
     """
-    loaded = {spice.kdata(i, "ALL")[0] for i in range(spice.ktotal("ALL"))}
     for fname in (config.LEAP_FILE, config.PCK_FILE, "de440s.bsp"):
-        path = os.path.join(config.DATA_DIR, fname)
-        if path not in loaded:
-            spice.furnsh(path)
+        path = config.find_data_file(fname, "spice")
+        if path is None:
+            raise FileNotFoundError(f"bundled SPICE kernel {fname} not found")
+        kernels.furnsh_kernel(path)
     config.state["kernel_downloaded"] = True
 
 

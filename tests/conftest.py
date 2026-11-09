@@ -98,8 +98,8 @@ def spice_offline(_isolated_cache_dir) -> None:
     """Load the bundled SPICE kernels and mark the NAIF download as done.
 
     ``SPICEEphem.load_kernels`` otherwise asks NAIF for file modification
-    times on first use. Kernels are furnished with the same path strings that
-    ``SPICEEphem`` builds, so it recognises them as already loaded.
+    times on first use. Kernels are resolved as ``SPICEEphem`` resolves them
+    (``config.find_data_file``), so it recognises them as already loaded.
     """
     load_bundled_kernels()
 
