@@ -36,6 +36,13 @@ def test_pl03_ids_filter_is_string_safe(constellation: Constellation) -> None:
     assert [str(k) for k in as_spacecraft_dict(constellation, ids=np.array(["B"]))] == [
         "B"
     ]
+    # any iterable works, not just sequences (sets, dict views, generators)
+    assert len(as_spacecraft_dict(constellation, ids={"A", "B"})) == 2
+    keys = constellation.spacecraft.keys()
+    assert len(as_spacecraft_dict(constellation, ids=keys)) == 3
+    # bytes IDs (as read from some HDF files) match their string form
+    assert [str(k) for k in as_spacecraft_dict(constellation, ids=b"B")] == ["B"]
+    assert len(as_spacecraft_dict(constellation, ids=[np.bytes_(b"C")])) == 1
 
 
 def test_pl04_bad_inputs(constellation: Constellation) -> None:

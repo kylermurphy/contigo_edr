@@ -5,7 +5,7 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 import numpy as np
@@ -25,10 +25,10 @@ def as_spacecraft_dict(
     data : Spacecraft or Constellation
         A ``Spacecraft`` is split with ``Spacecraft.split_by_id()``; a
         ``Constellation`` contributes its ``.spacecraft`` dict.
-    ids : sequence, optional
+    ids : iterable or scalar, optional
         Subset of spacecraft IDs to keep. IDs are compared as strings
-        (``str(key) == str(requested)``) because they are often pandas
-        categories or numpy strings. A single scalar ID is accepted. The
+        (``str(key) == str(requested)``, bytes decoded) because they are often
+        pandas categories or numpy strings. A single scalar ID is accepted. The
         original keys and the order of ``data`` are kept. By default all
         spacecraft are returned.
 
@@ -56,17 +56,24 @@ def as_spacecraft_dict(
     if ids is None:
         return sc_dict
 
-    if isinstance(ids, (str, bytes)) or np.ndim(ids) == 0:
-        ids = [ids]  # type: ignore[list-item]
-    requested = [str(i) for i in ids]
-    available = [str(k) for k in sc_dict]
+    if isinstance(ids, (str, bytes)) or not isinstance(ids, Iterable):
+        ids = [ids]  # a single ID
+    requested = [_id_str(i) for i in ids]
+    available = [_id_str(k) for k in sc_dict]
     missing = [r for r in requested if r not in available]
     if missing:
         raise ValueError(
             f"Unknown spacecraft ID(s) {missing}; available IDs: {available}"
         )
     wanted = set(requested)
-    return {k: v for k, v in sc_dict.items() if str(k) in wanted}
+    return {k: v for k, v in sc_dict.items() if _id_str(k) in wanted}
+
+
+def _id_str(sc_id: Any) -> str:
+    """Comparable string form of an ID (bytes from HDF files are decoded)."""
+    if isinstance(sc_id, (bytes, np.bytes_)):
+        return sc_id.decode()
+    return str(sc_id)
 
 
 def decimate(n: int, max_points: int) -> npt.NDArray[np.int_]:

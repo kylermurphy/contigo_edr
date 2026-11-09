@@ -8,9 +8,9 @@ works without it. The public plot functions are added in Phase 1; until then
 Private helpers:
 
 - ``contigo.plotting._util``: input normalisation, decimation and
-  antimeridian splitting (NumPy only).
+  antimeridian splitting (no matplotlib; uses contigo's core dependencies).
 - ``contigo.plotting._style``: lazy matplotlib import, per-spacecraft colours
-  and the shared rc style.
+  (``color_for``, ``color_map``) and the shared rc style.
 
 added: 09/11/2026 Claude Code
 """

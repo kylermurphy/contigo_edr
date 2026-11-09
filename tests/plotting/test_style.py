@@ -3,43 +3,46 @@
 added: 09/11/2026 Claude Code
 """
 
-import os
 import subprocess
 import sys
+import zlib
 
-import matplotlib
 import pytest
 
+matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
 from contigo.plotting import _style  # noqa: E402
 
 
 def test_pl09_color_for_is_deterministic() -> None:
-    """PL-09: same ID, same colour, across calls and across processes."""
+    """PL-09: an ID maps to a fixed tab20 entry (crc32, not hash())."""
     c1 = _style.color_for("A")
     assert c1 == _style.color_for("A")
     assert len(c1) == 4 and all(0.0 <= v <= 1.0 for v in c1)
     # str() based: numeric and string forms of an ID agree
     assert _style.color_for(25544) == _style.color_for("25544")
-
-    code = (
-        "import matplotlib; matplotlib.use('Agg');"
-        "from contigo.plotting import _style;"
-        "print(_style.color_for('CHAMP'))"
+    # fixed expectation: independent of PYTHONHASHSEED and of the process
+    expected_bin = zlib.crc32(b"CHAMP") % 20
+    assert expected_bin == 17
+    assert _style.color_for("CHAMP") == tuple(
+        float(v) for v in matplotlib.colormaps["tab20"](expected_bin)
     )
-    outs = {
-        subprocess.run(
-            [sys.executable, "-c", code],
-            capture_output=True,
-            text=True,
-            check=True,
-            env={**os.environ, "PYTHONHASHSEED": seed},
-        ).stdout.strip()
-        for seed in ("1", "2")
-    }
-    assert len(outs) == 1
-    assert outs == {str(_style.color_for("CHAMP"))}
+
+
+def test_pl09b_color_map_resolves_clashes() -> None:
+    """PL-09b: IDs sharing a crc32 bin still get distinct colours in one plot,
+    the result does not depend on input order, and non-clashing IDs keep
+    their color_for colour."""
+    # 'CHAMP' and 'SWARM-A' both fall in bin 17
+    assert zlib.crc32(b"SWARM-A") % 20 == zlib.crc32(b"CHAMP") % 20
+    ids = ["SWARM-A", "CHAMP", "GRACE"]
+    cmap = _style.color_map(ids)
+    assert list(cmap) == ids
+    assert len(set(cmap.values())) == len(ids)
+    assert cmap == _style.color_map(list(reversed(ids)))
+    assert cmap["CHAMP"] == _style.color_for("CHAMP")  # first in sorted order
+    assert cmap["GRACE"] == _style.color_for("GRACE")
 
 
 def test_pl10_rc_context_leaves_no_global_state() -> None:
@@ -51,18 +54,37 @@ def test_pl10_rc_context_leaves_no_global_state() -> None:
     assert dict(matplotlib.rcParams) == before
 
 
-def test_pl11_package_imports_without_matplotlib(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """PL-11: contigo.plotting imports without matplotlib; require_matplotlib
-    raises an ImportError that points to contigo[plot]."""
-    monkeypatch.setitem(sys.modules, "matplotlib", None)
-    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", None)
+_NO_MPL_SCRIPT = """
+import sys
+sys.modules["matplotlib"] = None          # simulate matplotlib not installed
+sys.modules["matplotlib.pyplot"] = None
+import contigo.plotting, contigo.plotting._util, contigo.plotting._style as s
+assert contigo.plotting.__all__ == []
+for fn in (s.require_matplotlib, lambda: s.color_for("A")):
+    try:
+        fn()
+    except ImportError as err:
+        assert "contigo[plot]" in str(err), err
+        assert isinstance(err.__cause__, ImportError)
+    else:
+        raise AssertionError("expected ImportError")
+print("ok")
+"""
 
-    import contigo.plotting
-    import contigo.plotting._util  # noqa: F401
 
-    assert contigo.plotting.__all__ == []
-    with pytest.raises(ImportError, match=r"contigo\[plot\]") as exc:
-        _style.require_matplotlib()
-    assert isinstance(exc.value.__cause__, ImportError)
+def test_pl11_package_imports_without_matplotlib(tmp_path) -> None:
+    """PL-11: in a fresh interpreter with matplotlib blocked, contigo.plotting
+    imports and the helpers raise an ImportError pointing to contigo[plot].
+
+    Runs in a subprocess (modules already imported in this process would make
+    the check a no-op) with cwd outside the repo, so the installed package is
+    the one imported.
+    """
+    res = subprocess.run(
+        [sys.executable, "-c", _NO_MPL_SCRIPT],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "ok"
