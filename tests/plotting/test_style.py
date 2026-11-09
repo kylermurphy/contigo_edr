@@ -3,9 +3,11 @@
 added: 09/11/2026 Claude Code
 """
 
+import os
 import subprocess
 import sys
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -77,14 +79,22 @@ def test_pl11_package_imports_without_matplotlib(tmp_path) -> None:
     imports and the helpers raise an ImportError pointing to contigo[plot].
 
     Runs in a subprocess (modules already imported in this process would make
-    the check a no-op) with cwd outside the repo, so the installed package is
-    the one imported.
+    the check a no-op), with cwd outside the repo and ``PYTHONPATH`` set to the
+    copy of contigo under test, so the subprocess imports the same package as
+    this test session (an editable install may point at another checkout).
     """
+    import contigo
+
+    pkg_root = str(Path(contigo.__file__).resolve().parents[1])
+    env = {**os.environ, "PYTHONPATH": pkg_root}
     res = subprocess.run(
-        [sys.executable, "-c", _NO_MPL_SCRIPT],
+        [sys.executable, "-c", _NO_MPL_SCRIPT + "print(contigo.__file__)\n"],
         capture_output=True,
         text=True,
         cwd=tmp_path,
+        env=env,
     )
     assert res.returncode == 0, res.stderr
-    assert res.stdout.strip() == "ok"
+    out = res.stdout.split()
+    assert out[0] == "ok"
+    assert Path(out[1]).resolve() == Path(contigo.__file__).resolve()
