@@ -39,7 +39,7 @@ dependencies = [
     "numpy>=1.23",
     "scipy>=1.10",
     "pandas>=2.0",
-    "h5py>=3.9",
+    "tables>=3.8",
     "numba>=0.57",
     "tqdm",
     "requests",
@@ -53,9 +53,15 @@ dependencies = [
 [project.optional-dependencies]
 orekit = ["orekitdata @ git+https://gitlab.orekit.org/orekit/orekit-data.git"]
 
-dev = [
-    "pytest",
+plot = ["matplotlib>=3.7"]
+
+test = [
+    "pytest>=8",
     "pytest-cov",
+]
+
+dev = [
+    "contigo[test]",
     "black",
     "ruff",
     "mypy",
@@ -68,21 +74,34 @@ docs = [
     "mkdocstrings[python]"
 ]
 
-[tool.setuptools]
-packages = ["contigo"]
+[tool.setuptools.packages.find]
+include = ["contigo*"]
 
 [tool.setuptools.package-data]
-contigo = ["py.typed"]
-"contigo.orekit_utils" = ["java/*.jar"]
+contigo = [
+    "py.typed",
+    "data/*.tls",
+    "data/*.bpc",
+    "data/*.bsp",
+    "data/*.hdf",
+    "data/EIGEN-2.gfc",
+]
 
 [tool.black]
 line-length = 88
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 ignore = ["E501"]
 
 [tool.pytest.ini_options]
 addopts = "-ra -q"
 testpaths = ["tests"]
+markers = [
+    "network: needs internet access (NAIF, ICGEM, GitLab); run with --run-network",
+    "orekit: starts the Orekit JVM; run with --run-orekit",
+    "slow: takes more than ~10 s; run with --run-slow",
+]

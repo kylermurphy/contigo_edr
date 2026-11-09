@@ -218,3 +218,6 @@ maven-status/
 ig_files/
 ig_*
 *.gfc
+
+# keep the bundled gravity field (other .gfc files are downloaded on demand)
+!contigo/data/EIGEN-2.gfc
