@@ -3,13 +3,16 @@
 added: 17/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
+import bz2
 import functools
 import gzip
 import io
 import logging
+import lzma
 import pathlib
 import shutil
 import zipfile
+from collections.abc import Iterator
 from datetime import datetime
 
 import pandas as pd
@@ -96,36 +99,55 @@ def wf_mtime(url):
 #: SP3 "bad or absent value" sentinel (clock and, in practice, other fields)
 _SP3_BAD = 999999.0
 
+#: Magic bytes of compressed formats; SP3 text is ASCII, so anything else is
+#: read as plain text.
+_MAGIC_GZIP = b"\x1f\x8b"
+_MAGIC_COMPRESS = b"\x1f\x9d"
+_MAGIC_BZ2 = b"BZh"
+_MAGIC_XZ = b"\xfd7zXZ\x00"
 
-def _sp3_lines(fn: pathlib.Path) -> list[str]:
-    """Return the text lines of a plain, gzip or zip SP3 file.
+
+def _sp3_lines(fn: pathlib.Path) -> Iterator[str]:
+    """Yield the text lines of a plain, gzip, bzip2, xz or zip SP3 file.
 
     The compression is detected from the file's magic bytes, not its name.
-    Unix ``compress`` (``.Z``) files cannot be read by :mod:`gzip`, so they
-    raise a clear error instead of being decoded as garbage.
+    Unix ``compress`` (``.Z``, LZW) files cannot be read by the standard
+    library, so they raise a clear error instead of being decoded as garbage.
+    Text is decoded as ASCII with ``errors='replace'``: only fixed-width
+    numeric columns are parsed, so stray bytes in comments are harmless.
     """
     with open(fn, "rb") as fb:
-        magic = fb.read(2)
+        magic = fb.read(6)
 
-    if magic == b"\x1f\x8b":  # gzip (.gz, and .Z files that are really gzip)
-        with gzip.open(fn, "rt", encoding="utf-8") as f:
-            return f.read().splitlines()
-    if magic == b"\x1f\x9d":  # unix compress (LZW)
+    def text(binary):
+        return io.TextIOWrapper(binary, encoding="ascii", errors="replace")
+
+    if magic.startswith(_MAGIC_COMPRESS):
         raise ValueError(
             f"{fn} is a unix-compress (.Z) file, which cannot be read; "
             "decompress it first (e.g. 'gzip -d' or 'uncompress')"
         )
-    if zipfile.is_zipfile(fn):
+    if magic.startswith(_MAGIC_GZIP):
+        opener = gzip.open
+    elif magic.startswith(_MAGIC_BZ2):
+        opener = bz2.open
+    elif magic.startswith(_MAGIC_XZ):
+        opener = lzma.open
+    elif zipfile.is_zipfile(fn):
         with zipfile.ZipFile(fn, "r") as z:
             names = [n for n in z.namelist() if ".sp3" in n.lower()]
             if not names:
                 names = [n for n in z.namelist() if not n.endswith("/")]
             if not names:
                 raise ValueError(f"{fn} is a zip archive with no SP3 member")
-            with z.open(names[0]) as member:
-                return io.TextIOWrapper(member, encoding="utf-8").read().splitlines()
-    with open(fn, "r", encoding="utf-8") as f:
-        return f.read().splitlines()
+            with z.open(names[0]) as member, text(member) as f:
+                yield from f
+        return
+    else:
+        opener = open
+
+    with opener(fn, "rb") as fb, text(fb) as f:
+        yield from f
 
 
 def _sp3_epoch(line: str) -> pd.Timestamp:
@@ -139,25 +161,39 @@ def _sp3_epoch(line: str) -> pd.Timestamp:
     )
 
 
-def _sp3_vector(line: str) -> tuple[float, float, float]:
-    """The three F14.6 fields of a ``P`` or ``V`` record (columns 5-46)."""
-    return (float(line[4:18]), float(line[18:32]), float(line[32:46]))
+def _sp3_vector(line: str) -> tuple[float, float, float] | None:
+    """The three F14.6 fields of a ``P`` or ``V`` record (columns 5-46).
+
+    Returns None when a field is blank, short or unparsable, or holds a bad or
+    absent value (999999.999999); for a ``P`` record a position of exactly
+    0, 0, 0 (the SP3 "absent position" convention) is also bad.
+    """
+    try:
+        vec = (float(line[4:18]), float(line[18:32]), float(line[32:46]))
+    except ValueError:  # blank or short line, or garbage in a numeric field
+        return None
+    if any(abs(c) >= _SP3_BAD for c in vec):
+        return None
+    if line[0] == "P" and vec == (0.0, 0.0, 0.0):
+        return None
+    return vec
 
 
 def df_sp3(fn: str | pathlib.Path, **kwargs) -> pd.DataFrame:
-    """Read an SP3-c/d orbit file (plain text, gzip or zip).
+    """Read an SP3-c/d orbit file (plain text, gzip, bzip2, xz or zip).
 
     Every ``P`` (position) and ``V`` (velocity) record is attached to the epoch
     of the most recent ``*`` line, so files with many satellites per epoch are
     supported. Each position is matched with the velocity of the same
     satellite at the same epoch. Correlation records (``EP``/``EV``), header
     and comment lines and clock values are ignored; parsing stops at ``EOF``.
+    The file is streamed line by line.
 
     Parameters
     ----------
     fn : str | pathlib.Path
-        Path to the SP3 file. Compression (gzip or zip) is detected from the
-        file contents. Unix-compress (``.Z``) files are not supported.
+        Path to the SP3 file. Compression is detected from the file contents.
+        Unix-compress (``.Z``, LZW) files are not supported.
     **kwargs
         Not supported. Accepted only so that ``Spacecraft._load_table`` can
         forward ``read_kwargs``; any keyword raises ``TypeError``.
@@ -180,9 +216,13 @@ def df_sp3(fn: str | pathlib.Path, **kwargs) -> pd.DataFrame:
     Notes
     -----
     SP3 positions are in km and velocities in dm/s; they are converted to m
-    and m/s. Records with a bad or absent position or velocity (a component
-    of 999999.999999, or a position of exactly 0, 0, 0) are dropped with a
-    logged warning, as are positions without a matching velocity.
+    and m/s. A record that is bad or absent (blank, short or unparsable
+    fields, a component of 999999.999999, or a position of exactly 0, 0, 0) is
+    dropped with a logged warning naming its line numbers; a position left
+    without a matching velocity is dropped too. A ``V`` record directly after
+    the ``P`` record of the same satellite and epoch forms a pair with it, and
+    a bad record drops its whole pair. If a (satellite, epoch) record appears
+    more than once, the first good one is kept.
     """
     if kwargs:
         raise TypeError(
@@ -194,10 +234,13 @@ def df_sp3(fn: str | pathlib.Path, **kwargs) -> pd.DataFrame:
     Key = tuple[str, pd.Timestamp]
     pos: dict[Key, tuple[float, float, float]] = {}
     vel: dict[Key, tuple[float, float, float]] = {}
-    bad: set[Key] = set()
+    bad_lines: list[int] = []
+    n_dup = 0
+    seen_v = False
     epoch = None
+    last_p: tuple[Key, bool] | None = None
 
-    for line in _sp3_lines(fn):
+    for lineno, line in enumerate(_sp3_lines(fn), start=1):
         if line.startswith("EOF"):
             break
         rec = line[:1]
@@ -208,31 +251,60 @@ def df_sp3(fn: str | pathlib.Path, **kwargs) -> pd.DataFrame:
                 raise ValueError(f"{fn}: SP3 {rec} record before the first epoch")
             key = (line[1:4].strip(), epoch)
             vec = _sp3_vector(line)
-            if any(abs(c) >= _SP3_BAD for c in vec) or (
-                rec == "P" and vec == (0.0, 0.0, 0.0)
-            ):
-                bad.add(key)
-            (pos if rec == "P" else vel)[key] = vec
+            if rec == "P":
+                # (key, accepted) of this P, for the V record that follows it
+                last_p = (key, vec is not None and key not in pos)
+                if vec is None:
+                    bad_lines.append(lineno)
+                elif key in pos:
+                    n_dup += 1
+                else:
+                    pos[key] = vec
+                continue
+            seen_v = True
+            paired = last_p is not None and last_p[0] == key
+            if paired and not last_p[1]:
+                continue  # its P record was bad or a repeat: drop the pair
+            if vec is None:
+                bad_lines.append(lineno)
+                if paired:
+                    del pos[key]  # the pair is bad; a later repeat may be good
+                continue
+            if key in vel:
+                n_dup += 1
+                continue
+            vel[key] = vec
 
-    if not vel:
+    if not seen_v:
         raise ValueError(
             f"{fn} has no velocity (V) records; Spacecraft requires velocities"
+        )
+    if bad_lines:
+        logger.warning(
+            "df_sp3: dropped %d bad/absent SP3 record(s) in %s at line(s) %s%s",
+            len(bad_lines),
+            fn,
+            ", ".join(map(str, bad_lines[:10])),
+            ", ..." if len(bad_lines) > 10 else "",
+        )
+    if n_dup:
+        logger.warning(
+            "df_sp3: ignored %d repeated (satellite, epoch) record(s) in %s; "
+            "kept the first",
+            n_dup,
+            fn,
         )
 
     rows = []
     n_unmatched = 0
-    for key, p in pos.items():
-        if key in bad:
-            continue
-        if key not in vel:
+    for key, (x, y, z) in pos.items():
+        v = vel.get(key)
+        if v is None:
             n_unmatched += 1
             continue
-        rows.append((key[0], key[1], *p, *vel[key]))
-    if bad:
-        logger.warning(
-            "df_sp3: dropped %d SP3 record(s) with bad/absent values in %s",
-            len(bad),
-            fn,
+        # km -> m, dm/s -> m/s
+        rows.append(
+            (*key, x * 1e3, y * 1e3, z * 1e3, v[0] / 10.0, v[1] / 10.0, v[2] / 10.0)
         )
     if n_unmatched:
         logger.warning(
@@ -242,11 +314,4 @@ def df_sp3(fn: str | pathlib.Path, **kwargs) -> pd.DataFrame:
             fn,
         )
 
-    df = pd.DataFrame(rows, columns=["sat", "time", "x", "y", "z", "vx", "vy", "vz"])
-    df[["x", "y", "z", "vx", "vy", "vz"]] = df[
-        ["x", "y", "z", "vx", "vy", "vz"]
-    ].astype(float)
-    df[["x", "y", "z"]] *= 1000.0  # km -> m
-    df[["vx", "vy", "vz"]] /= 10.0  # dm/s -> m/s
-    df["time"] = pd.to_datetime(df["time"])
-    return df
+    return pd.DataFrame(rows, columns=["sat", "time", "x", "y", "z", "vx", "vy", "vz"])

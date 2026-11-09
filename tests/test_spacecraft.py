@@ -10,6 +10,10 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
+import bz2
+import gzip
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -309,11 +313,8 @@ def test_sc05_zipped_and_mixed_csv(tmp_path):
 
     Expected: pandas infers the zip compression from the extension; the
     explicit list is concatenated in sorted path order (``a_*`` before ``b_*``).
-    The second file starts a day later so its (``NO_ID``, time) rows are not
-    duplicates of the first file's (SC-11b drops duplicates).
     """
-    dfa = _frame(9)
-    dfb = _frame(11, alt=500e3, inc_deg=87.0, t0="2018-01-03 00:00:00")
+    dfa, dfb = _frame(9), _frame(11, alt=500e3, inc_deg=87.0)
     zipped = tmp_path / "a_orbit.csv.zip"
     plain = tmp_path / "b_orbit.csv"
     dfa.to_csv(zipped, index=False, compression="zip")
@@ -723,12 +724,13 @@ def test_sc11_sp3_bad_value_record_dropped(tmp_path, caplog):
     assert "bad" in caplog.text
 
 
-def test_sc11b_overlapping_csv_files_drop_duplicates(tmp_path):
+def test_sc11b_overlapping_csv_files_drop_duplicates(tmp_path, caplog):
     """SC-11b (extra): the (ID, time) dedup also applies to CSV files.
 
-    Expected: two CSV files share 5 of 15 samples (the second file's copies
-    have x shifted by 1 m); 25 unique rows load and the shared rows carry the
-    first file's values.
+    Expected: two CSV files of one spacecraft (``sc_id_input``) share 5 of 15
+    samples (the second file's copies have x shifted by 1 m); 25 unique rows
+    load, the shared rows carry the first file's values, and a warning names
+    the count and an example (ID, time) pair.
     """
     df = _frame(n=25)
     first = df.iloc[:15]
@@ -736,12 +738,177 @@ def test_sc11b_overlapping_csv_files_drop_duplicates(tmp_path):
     second["x"] += 1.0
     first.to_csv(tmp_path / "a.csv", index=False)
     second.to_csv(tmp_path / "b.csv", index=False)
-    sc = Spacecraft(state_file=str(tmp_path / "*.csv"), tscale_input="GPS")
+    with caplog.at_level("WARNING"):
+        sc = Spacecraft(
+            state_file=str(tmp_path / "*.csv"),
+            tscale_input="GPS",
+            sc_id_input="SAT-A",
+        )
     assert sc.N == 25
     np.testing.assert_allclose(sc.state_ecef[:15], first[STATE_COLS].to_numpy())
     np.testing.assert_allclose(
         sc.state_ecef[15:], second[STATE_COLS].to_numpy()[5:], rtol=1e-12
     )
+    assert "Dropped 5 duplicate" in caplog.text
+    assert f"(SAT-A, {pd.Timestamp(df['time'].iloc[10])})" in caplog.text
+
+
+def test_sc11b_csv_without_ids_keeps_repeated_times(tmp_path, caplog):
+    """SC-11b (extra): without IDs, repeated times are kept with a warning.
+
+    Expected: two different spacecraft in two CSVs on the same time grid and
+    no ``sc_id_col``/``sc_id_input`` -> all 20 rows load (nothing is dropped,
+    as the rows are probably different spacecraft) and a warning suggests
+    setting ``sc_id_col``.
+    """
+    dfa, dfb = _frame(10), _frame(10, alt=500e3, inc_deg=87.0)
+    dfa.to_csv(tmp_path / "a.csv", index=False)
+    dfb.to_csv(tmp_path / "b.csv", index=False)
+    with caplog.at_level("WARNING"):
+        sc = Spacecraft(state_file=str(tmp_path / "*.csv"), tscale_input="GPS")
+    assert sc.N == 20
+    np.testing.assert_allclose(sc.state_ecef[:10], dfa[STATE_COLS], rtol=1e-12)
+    np.testing.assert_allclose(sc.state_ecef[10:], dfb[STATE_COLS], rtol=1e-12)
+    assert "sc_id_col" in caplog.text
+    assert "none were dropped" in caplog.text
+
+
+def test_sc11_sp3_ids_from_file_by_default(tmp_path):
+    """SC-11 (extra): without ``sc_id_col`` SP3 vehicle IDs are the IDs.
+
+    Expected: a 2-satellite SP3 loaded with no ID options keeps all 6 rows
+    (no satellite is mistaken for a duplicate) with IDs ``L48`` and ``L49``.
+    """
+    path = tmp_path / "two_sat.sp3"
+    _write_sp3(path, SP3_EPOCHS, SP3_A | SP3_B)
+    sc = Spacecraft(state_file=path, tscale_input="GPS")
+    assert sc.N == 6
+    assert sorted(map(str, sc.unique_ids)) == ["L48", "L49"]
+    parts = sc.split_by_id()
+    for recs, sat in ((SP3_A, "L48"), (SP3_B, "L49")):
+        expected = np.array([_si(recs[(k, sat)]) for k in range(3)])
+        np.testing.assert_allclose(parts[sat].state_ecef, expected, rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "name, opener",
+    [("orbit.sp3.gz", gzip.open), ("orbit.sp3.bz2", bz2.open)],
+)
+def test_sc11_compressed_sp3_through_spacecraft(tmp_path, name, opener):
+    """SC-11 (extra): compressed SP3 files load through Spacecraft.
+
+    Expected: the loader is inferred from the suffix chain (``.sp3.gz`` ->
+    sp3) and the compression from the magic bytes; the state equals the
+    uncompressed file's.
+    """
+    plain = tmp_path / "plain.sp3"
+    _write_sp3(plain, SP3_EPOCHS, SP3_A)
+    packed = tmp_path / name
+    with opener(packed, "wb") as f:
+        f.write(plain.read_bytes())
+    sc = Spacecraft(state_file=packed, tscale_input="GPS")
+    expected = np.array([_si(SP3_A[(k, "L48")]) for k in range(3)])
+    np.testing.assert_allclose(sc.state_ecef, expected, rtol=1e-12)
+    assert list(sc.unique_ids) == ["L48"]
+
+
+def test_sc11_infer_loader_from_suffix_chain():
+    """SC-11 (extra): loader inference uses the full suffix chain.
+
+    Expected: compression suffixes are skipped (``.sp3.Z`` -> sp3,
+    ``.csv.gz`` -> csv); a bare ``.gz`` is CSV as before; unknown -> error.
+    """
+    infer = Spacecraft._infer_loader
+    for name in ("a.sp3", "a.sp3.gz", "a.sp3.Z", "a.SP3.zip", "CH.L48.sp3.gz"):
+        assert infer(Path(name)) == "sp3", name
+    for name in ("a.csv", "a.csv.gz", "a.txt.bz2", "a.gz", "a.2018.gz"):
+        assert infer(Path(name)) == "csv", name
+    assert infer(Path("a.h5")) == "hdf"
+    assert infer(Path("a.dat"), "sp3") == "sp3"
+    with pytest.raises(ValueError, match="Unsupported loader"):
+        infer(Path("a.dat"))
+
+
+def test_sc11_sp3_repeated_record_keeps_first_good(tmp_path, caplog):
+    """SC-11 (extra): a repeated (satellite, epoch) record keeps the first good.
+
+    Expected: epoch 0 is followed by a second, different L48 P/V pair -> the
+    first is kept. At epoch 1 a bad P record precedes a good one -> the good
+    one is kept (the bad flag belongs to the record, not the key). At epoch 2
+    a bad repeat after a good record does not remove the good one.
+    """
+    good = {k: _sat_lines("L48", *SP3_A[(k, "L48")]) for k in range(3)}
+    other = _sat_lines("L48", (1.0, 2.0, 3.0), (4.0, 5.0, 6.0))
+    bad_p = _sat_lines("L48", (999999.999999, 0.0, 0.0), (4.0, 5.0, 6.0))
+    absent_p = _sat_lines("L48", (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))
+    body = _sp3_header(SP3_EPOCHS)
+    body += _epoch_line(SP3_EPOCHS[0]) + good[0] + other
+    body += _epoch_line(SP3_EPOCHS[1]) + bad_p + good[1]
+    body += _epoch_line(SP3_EPOCHS[2]) + good[2] + absent_p
+    path = tmp_path / "rep.sp3"
+    path.write_text(body + "EOF\n")
+    with caplog.at_level("WARNING"):
+        df = df_sp3(path)
+    expected = np.array([_si(SP3_A[(k, "L48")]) for k in range(3)])
+    np.testing.assert_allclose(df[STATE_COLS].to_numpy(), expected, rtol=1e-12)
+    assert (pd.DatetimeIndex(df["time"]) == pd.DatetimeIndex(SP3_EPOCHS)).all()
+    assert "repeated" in caplog.text
+
+
+def test_sc11_sp3_blank_or_short_fields_dropped(tmp_path, caplog):
+    """SC-11 (extra): blank/short numeric fields drop the record with a warning.
+
+    Expected: the epoch-1 P record is truncated after x, so its y and z are
+    missing; that record (and so its epoch) is dropped and the warning names
+    the file and the line number.
+    """
+    path = tmp_path / "short.sp3"
+    _write_sp3(path, SP3_EPOCHS, SP3_A)
+    lines = path.read_text().splitlines(keepends=True)
+    p_idx = [i for i, ln in enumerate(lines) if ln.startswith("P")][1]
+    lines[p_idx] = lines[p_idx][:18] + "\n"
+    path.write_text("".join(lines))
+    with caplog.at_level("WARNING"):
+        df = df_sp3(path)
+    assert (pd.DatetimeIndex(df["time"]) == pd.DatetimeIndex(SP3_EPOCHS[::2])).all()
+    assert "short.sp3" in caplog.text
+    assert f"line(s) {p_idx + 1}" in caplog.text
+
+
+def test_sc11_sp3_non_utf8_comment(tmp_path):
+    """SC-11 (extra): a non-UTF-8 byte in a comment line does not break loading.
+
+    Expected: a Latin-1 comment (``\\xe9``) is decoded with replacement and the
+    frame equals the clean file's.
+    """
+    plain = tmp_path / "plain.sp3"
+    _write_sp3(plain, SP3_EPOCHS, SP3_A)
+    raw = plain.read_bytes().replace(b"/* synthetic", b"/* caf\xe9 synthetic", 1)
+    odd = tmp_path / "latin1.sp3"
+    odd.write_bytes(raw)
+    pd.testing.assert_frame_equal(df_sp3(odd), df_sp3(plain))
+
+
+def test_sc11_sp3_rejects_unit_input_km(tmp_path):
+    """SC-11 (extra): SP3 is converted to metres, so ``unit_input='km'`` fails.
+
+    Expected: ValueError explaining that unit_input should stay 'm'.
+    """
+    path = tmp_path / "one_sat.sp3"
+    _write_sp3(path, SP3_EPOCHS, SP3_A)
+    with pytest.raises(ValueError, match="unit_input"):
+        Spacecraft(state_file=path, tscale_input="GPS", unit_input="km")
+
+
+def test_sc11_sp3_unix_compress_rejected(tmp_path):
+    """SC-11 (extra): a unix-compress (.Z) file raises a clear error.
+
+    Expected: the LZW magic bytes ``1f 9d`` are recognised and rejected.
+    """
+    path = tmp_path / "orbit.sp3.Z"
+    path.write_bytes(b"\x1f\x9d\x90" + b"\x00" * 20)
+    with pytest.raises(ValueError, match="unix-compress"):
+        df_sp3(path)
 
 
 # ---------------------------------------------------------------------------
