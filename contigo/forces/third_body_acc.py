@@ -4,6 +4,7 @@ added: 17/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 import logging
+import warnings
 from datetime import timezone
 
 import numpy as np
@@ -23,7 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 class ThirdBodyAcc:
-    """Deriving Third Body Acceleration using JPL SPICE"""
+    """Deriving Third Body Acceleration using JPL SPICE
+
+    .. deprecated:: 0.2.0
+        ``ThirdBodyAcc`` will be removed in contigo 0.3.0. Use
+        :class:`ThirdBodyEnv` with a
+        :class:`~contigo.solar_system_ephem.SolarSystemEnvironment` instead.
+    """
 
     def __init__(
         self,
@@ -55,7 +62,8 @@ class ThirdBodyAcc:
             by default np.array([6_771_000.0,0,0],ndmin=2)
         stime : npt.ArrayLike (n), optional
             An array of spacecraft times for which the position of body are retrieved.
-            The scale of the time is needed in order to derive JPL SPICE ephemeris
+            Any input accepted by ``pd.to_datetime`` (list, array, Series, Index);
+            stored as a ``pd.DatetimeIndex``. The scale of the time is needed in order to derive JPL SPICE ephemeris
             time (ET). By default pd.Series(pd.to_datetime('2020-01-01')).
         body : npt.ArrayLike, optional
             A list of bodies for which to calculate accelerations at the location
@@ -80,6 +88,13 @@ class ThirdBodyAcc:
         ValueError
             scale not in allowed scales
         """
+        warnings.warn(
+            "ThirdBodyAcc is deprecated and will be removed in contigo 0.3.0; "
+            "use ThirdBodyEnv with a SolarSystemEnvironment instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # set defaults
         if spos is None:
             spos = np.array([[6_771_000.0, 0.0, 0.0]])
@@ -110,7 +125,9 @@ class ThirdBodyAcc:
         if self.spos.ndim != 2 or self.spos.shape[1] != 3:
             raise ValueError("spos must have shape (N,3)")
 
-        self.stime = pd.to_datetime(stime)
+        # normalise to a DatetimeIndex: pd.to_datetime returns a Series for a
+        # Series input, which has no .tzinfo (used in calc_tba)
+        self.stime = pd.DatetimeIndex(pd.to_datetime(stime))
         if self.stime.shape[0] != self.spos.shape[0]:
             raise ValueError("spos and stime must have be (N,3) and (N)")
 

@@ -17,7 +17,6 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
-import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -296,10 +295,15 @@ def test_third_body_env_row0_snapshot(esa_spice):
 # ---------------------------------------------------------------------------
 # FO-12 legacy ThirdBodyAcc
 # ---------------------------------------------------------------------------
+DEPRECATION_MSG = "ThirdBodyAcc is deprecated"
+
+
 def _legacy(sc, stime):
-    return ThirdBodyAcc(
-        spos=sc.state_ecef[:, :3], stime=stime, body=BODIES, scale="GPS"
-    )
+    """Build a ``ThirdBodyAcc`` (R9: construction emits ``DeprecationWarning``)."""
+    with pytest.warns(DeprecationWarning, match=DEPRECATION_MSG):
+        return ThirdBodyAcc(
+            spos=sc.state_ecef[:, :3], stime=stime, body=BODIES, scale="GPS"
+        )
 
 
 def test_third_body_acc_legacy_equals_env(esa_spice, esa_pod_small):
@@ -313,7 +317,6 @@ def test_third_body_acc_legacy_equals_env(esa_spice, esa_pod_small):
     positions because the 10 s samples fall in distinct bins.
     """
     sc = esa_spice.sc
-    # GPS labels as a tz-naive DatetimeIndex (a Series fails: see below)
     leg = _legacy(sc, pd.DatetimeIndex(esa_pod_small["DateTime"]))
     leg.calc_tba()
 
@@ -321,34 +324,54 @@ def test_third_body_acc_legacy_equals_env(esa_spice, esa_pod_small):
     assert leg.get_body_pos().shape == (2, sc.N, 3)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=pytest.fail.Exception,
-    reason="R9: ThirdBodyAcc not yet deprecated",
-)
-def test_third_body_acc_warns_deprecation(esa_spice, esa_pod_small):
-    """FO-12: after R9, using ``ThirdBodyAcc`` emits ``DeprecationWarning``."""
-    with pytest.warns(DeprecationWarning):
-        leg = _legacy(esa_spice.sc, pd.DatetimeIndex(esa_pod_small["DateTime"]))
-        leg.calc_tba()
+def test_third_body_acc_warns_deprecation():
+    """FO-12 / R9: constructing ``ThirdBodyAcc`` emits ``DeprecationWarning``.
 
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason=(
-        "NEW: ThirdBodyAcc.calc_tba reads stime.tzinfo, which a pandas Series "
-        "lacks; fails for a Series stime, including the default"
-    ),
-)
-def test_third_body_acc_accepts_series_stime(esa_spice, esa_pod_small):
-    """FO-12: ``stime`` given as a ``pd.Series`` (the documented default type).
-
-    ``pd.to_datetime(Series)`` returns a Series, which has ``.dt.tz`` but no
-    ``.tzinfo``.
+    The warning names the removal release and the replacement, and points at
+    the caller (``stacklevel=2``), not at contigo itself.
     """
-    leg = _legacy(esa_spice.sc, esa_pod_small["DateTime"])
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        leg.calc_tba()
+    with pytest.warns(DeprecationWarning) as record:
+        ThirdBodyAcc(scale="GPS")
+    assert len(record) == 1
+    msg = str(record[0].message)
+    assert "0.3.0" in msg and "ThirdBodyEnv" in msg
+    assert record[0].filename == __file__
+
+
+@pytest.mark.parametrize("kind", ["series", "list", "index"])
+def test_third_body_acc_accepts_series_stime(esa_spice, esa_pod_small, kind):
+    """FO-12 / F23: ``stime`` as Series (the documented default type), list or
+    DatetimeIndex gives the same result as ``ThirdBodyEnv``.
+
+    ``pd.to_datetime(Series)`` returns a Series, which has no ``.tzinfo``;
+    ``stime`` is now stored as a ``DatetimeIndex``.
+    """
+    series = esa_pod_small["DateTime"]
+    stime = {
+        "series": series,
+        "list": series.tolist(),
+        "index": pd.DatetimeIndex(series),
+    }[kind]
+    leg = _legacy(esa_spice.sc, stime)
+    assert isinstance(leg.stime, pd.DatetimeIndex)
+    leg.calc_tba()
     np.testing.assert_allclose(leg.get_tba(), esa_spice.acc, rtol=1e-13, atol=0)
+
+
+def test_third_body_acc_default_stime():
+    """F23: the class default ``stime`` (a one-element Series) works."""
+    with pytest.warns(DeprecationWarning, match=DEPRECATION_MSG):
+        leg = ThirdBodyAcc(scale="UTC")
+    leg.calc_tba()
+    acc = leg.get_tba()
+    assert acc.shape == (1, 1, 3)
+    assert 1e-7 < np.linalg.norm(acc) < 2e-6
+
+
+def test_third_body_acc_rejects_non_utc_timezone():
+    """``calc_tba`` still rejects a tz-aware ``stime`` that is not UTC."""
+    stime = pd.Series(pd.to_datetime(["2020-01-01"]).tz_localize("US/Eastern"))
+    with pytest.warns(DeprecationWarning, match=DEPRECATION_MSG):
+        leg = ThirdBodyAcc(stime=stime, scale="UTC")
+    with pytest.raises(ValueError, match="time zone naive or UTC"):
+        leg.calc_tba()
