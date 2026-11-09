@@ -5,6 +5,7 @@ added: 18/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 import glob
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,8 @@ import pandas as pd
 import spiceypy as spice
 
 from contigo.contigo_utils import time_utils, utils
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -208,6 +211,16 @@ class Spacecraft:
         read_kwargs : dict | None, optional
             Keyword arguments forwarded to the loader function, by default None.
 
+        Notes
+        -----
+        Files are loaded in sorted name order. When spacecraft IDs are known
+        (``sc_id_col``, ``sc_id_input``, or the vehicle IDs of SP3 files when
+        ``sc_id_col`` is None), rows that repeat a (spacecraft ID, time) pair
+        already loaded, e.g. from overlapping daily files, are dropped so the
+        first occurrence is kept, with a warning. Without IDs repeated times
+        are kept and a warning is logged. SP3 files are converted to metres
+        and m/s by the loader, so ``unit_input`` must be 'm' for them.
+
         Raises
         ------
         ValueError
@@ -222,6 +235,7 @@ class Spacecraft:
 
         files = self._expand_files(state_file)
         frames: list[pd.DataFrame] = []
+        loaders = {self._infer_loader(file, loader) for file in files}
 
         for file in files:
             df = self._load_table(file, loader, read_kwargs)
@@ -268,9 +282,13 @@ class Spacecraft:
         if len(t) != s.shape[0]:
             raise ValueError("Time and state must have equal length")
 
-        # Spacecraft ID handling
+        # Spacecraft ID handling. SP3 files carry their own vehicle IDs, which
+        # are used when no sc_id_col is given.
+        real_ids = True
         if self.sc_id_col is not None and self.sc_id_col in df_all.columns:
             sc_id_arr = df_all[self.sc_id_col].astype("category").to_numpy()
+        elif self.sc_id_col is None and loaders == {"sp3"}:
+            sc_id_arr = df_all["sat"].astype("category").to_numpy()
         elif self.sc_id_input is not None:
             sc_id_arr = (
                 pd.Series(np.full(len(t), self.sc_id_input, dtype=object))
@@ -278,11 +296,49 @@ class Spacecraft:
                 .to_numpy()
             )
         else:
+            real_ids = False
             sc_id_arr = (
                 pd.Series(np.full(len(t), "NO_ID", dtype=object))
                 .astype("category")
                 .to_numpy()
             )
+
+        # Drop duplicate (spacecraft ID, time) rows, e.g. from overlapping
+        # daily files, keeping the first occurrence (files are loaded in
+        # sorted name order). Without real IDs, repeated times most likely
+        # belong to different spacecraft, so nothing is dropped.
+        dup = pd.DataFrame({"id": np.asarray(sc_id_arr), "t": t}).duplicated(
+            keep="first"
+        )
+        n_dup = int(dup.sum())
+        if n_dup and not real_ids:
+            logger.warning(
+                "%d row(s) repeat a time already loaded but no spacecraft IDs "
+                "were given; they probably come from several spacecraft, so "
+                "none were dropped. Set sc_id_col (or sc_id_input) to identify "
+                "them and drop true duplicates.",
+                n_dup,
+            )
+        elif n_dup:
+            is_dup = dup.to_numpy()
+            examples = ", ".join(
+                f"({i}, {ti})"
+                for i, ti in zip(
+                    np.asarray(sc_id_arr)[is_dup][:5], t[is_dup][:5], strict=True
+                )
+            )
+            logger.warning(
+                "Dropped %d duplicate (spacecraft ID, time) row(s) while loading, "
+                "keeping the first occurrence: %s%s",
+                n_dup,
+                examples,
+                ", ..." if n_dup > 5 else "",
+            )
+            keep = ~dup.to_numpy()
+            s = s[keep]
+            t = t[keep]
+            sc_id_arr = sc_id_arr[keep]
+            df_all = df_all.loc[keep].reset_index(drop=True)
 
         # Commit normalized state
         self.state_ecef = s
@@ -428,32 +484,62 @@ class Spacecraft:
         Returns:
             pd.DataFrame: DataFrame containing Spacecraft data loaded from passed files.
         """
-        """Dispatch to the appropriate reader based on loader or file extension."""
-        suffix = file.suffix.lower()
-        loader = loader or suffix.lstrip(".")
+        loader = self._infer_loader(file, loader)
         kwargs = read_kwargs or {}
 
-        base_txt = {"csv", "txt", "text"}
-        zip_txt = {
-            "gz",
-            "bz2",
-            "zip",
-            "xz",
-            "zst",
-            "tar",
-            "tar.gz",
-            "tar.xz",
-            "tar.bz2",
-        }
-
-        if loader in (base_txt | zip_txt):
+        if loader == "csv":
             return pd.read_csv(file, **kwargs)
-        elif loader in {"hdf", "h5"}:
+        elif loader == "hdf":
             return pd.read_hdf(file, **kwargs)
-        elif loader == "sp3":
+        else:  # sp3
+            if self.unit_input.lower() not in ("m", "meter", "metre"):
+                raise ValueError(
+                    f"unit_input={self.unit_input!r} is not allowed for SP3 files: "
+                    "the SP3 loader already converts km and dm/s to m and m/s, "
+                    "so leave unit_input at 'm'"
+                )
             return utils.df_sp3(file, **kwargs)
+
+    @staticmethod
+    def _infer_loader(file: Path, loader: str | None = None) -> str:
+        """Resolve the loader ('csv', 'hdf' or 'sp3') for a file.
+
+        An explicit ``loader`` is normalized; otherwise the full suffix chain
+        is used, ignoring trailing compression suffixes, so ``.sp3.gz``,
+        ``.sp3.Z`` and ``.sp3.zip`` are SP3 and ``.csv.gz`` is CSV. A file
+        whose only known suffix is a compression suffix (e.g. ``.gz``) is
+        read as CSV.
+
+        Raises:
+            ValueError: if the loader or file extension can't be identified.
+        """
+        base_txt = {"csv", "txt", "text"}
+        compress = {"gz", "z", "bz2", "zip", "xz", "zst", "tar"}
+        zip_txt = compress | {"tar.gz", "tar.xz", "tar.bz2"}
+
+        if loader is None:
+            suffixes = [s.lstrip(".").lower() for s in file.suffixes]
+            stripped = False
+            while suffixes and suffixes[-1] in compress:
+                suffixes.pop()
+                stripped = True
+            base = suffixes[-1] if suffixes else ""
+            if base in base_txt | {"hdf", "h5", "sp3"}:
+                loader = base
+            elif stripped:
+                loader = "csv"
+            else:
+                loader = file.suffix.lower().lstrip(".")
         else:
-            raise ValueError(f"Unsupported loader type: {loader}")
+            loader = loader.lower()
+
+        if loader in base_txt | zip_txt:
+            return "csv"
+        if loader in {"hdf", "h5"}:
+            return "hdf"
+        if loader == "sp3":
+            return "sp3"
+        raise ValueError(f"Unsupported loader type: {loader}")
 
     def split_by_id(self) -> dict:
         """Split a multi-ID Spacecraft container into individual
