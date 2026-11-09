@@ -77,12 +77,6 @@ def test_sc02_unit_input_km():
     np.testing.assert_array_equal(sc_m.state_ecef, state)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="NEW: Spacecraft.load_from_arrays keeps a view of the caller's state "
-    "array and _normalize_units multiplies it in place for unit_input='km'",
-)
 def test_sc02_km_does_not_mutate_input():
     """SC-02 (extra): the caller's array is left untouched by the km conversion.
 
@@ -92,6 +86,39 @@ def test_sc02_km_does_not_mutate_input():
     state_km = state / 1000.0
     before = state_km.copy()
     Spacecraft(state=state_km, time=time, tscale_input="GPS", unit_input="km")
+    np.testing.assert_array_equal(state_km, before)
+
+
+def test_sc02_m_does_not_share_input():
+    """SC-02 (extra): with ``unit_input='m'`` the object owns its state too.
+
+    Expected: the internal array is not the caller's array (nor a view of it),
+    so editing either one leaves the other unchanged.
+    """
+    state, time = make_circular_orbit(n=10)
+    before = state.copy()
+    sc = Spacecraft(state=state, time=time, tscale_input="GPS", unit_input="m")
+    assert not np.shares_memory(sc.state_ecef, state)
+    sc.state_ecef[0, 0] = -1.0
+    np.testing.assert_array_equal(state, before)
+    state[1, 1] = -2.0
+    assert sc.state_ecef[1, 1] == before[1, 1]
+
+
+def test_sc02_km_reload_converts_once():
+    """SC-02 (extra): reloading a km spacecraft converts units exactly once.
+
+    Expected: loading the same km array twice leaves the state at x1000 of
+    the input (the original SI orbit), not x1e6, and the input is unchanged.
+    """
+    state, time = make_circular_orbit(n=10)
+    state_km = state / 1000.0
+    before = state_km.copy()
+    sc = Spacecraft(state=state_km, time=time, tscale_input="GPS", unit_input="km")
+    sc.load_from_arrays(state_km, time)
+    np.testing.assert_allclose(sc.state_ecef, state, rtol=1e-14)
+    sc.load_from_arrays(state_km, time)
+    np.testing.assert_allclose(sc.state_ecef, state, rtol=1e-14)
     np.testing.assert_array_equal(state_km, before)
 
 
@@ -686,13 +713,6 @@ def test_sc12_state_data_cache(sc_single):
     assert list(sd2.unique_ids) == ["SAT-Z"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="NEW: load_from_arrays/load_from_file do not recompute the time axes "
-    "(sspice_et, sspice_gps, sc_utc) or the unit conversion; only __post_init__ "
-    "does, so a reload leaves stale axes of the old length",
-)
 def test_sc12_reload_refreshes_time_axes(sc_single):
     """SC-12 (extra): after ``load_from_arrays`` the time axes match the new N.
 
@@ -707,3 +727,42 @@ def test_sc12_reload_refreshes_time_axes(sc_single):
     # the cached grouped view must carry the refreshed axes too
     sd = sc_single.state_data
     assert len(sd.sspice_gps) == sd.N == 10
+
+
+def test_sc12_reload_from_file_refreshes_everything(tmp_path):
+    """SC-12 (extra): ``load_from_file`` on an existing object is fully normalised.
+
+    Expected: after reloading a 7-row km CSV into a 20-row km spacecraft, N,
+    the time axes, the per-row properties (from the ``cd`` column) and the
+    SI state all equal those of a Spacecraft freshly built from that CSV,
+    with the km conversion applied once.
+    """
+    df1 = _frame(n=20)
+    df1[STATE_COLS] /= 1000.0
+    df1["cd"] = 2.0
+    df1.to_csv(tmp_path / "first.csv", index=False)
+
+    df2 = _frame(n=7, alt=600e3, t0="2024-03-01T00:00:00")
+    state2 = df2[STATE_COLS].to_numpy()
+    df2[STATE_COLS] /= 1000.0
+    df2["cd"] = np.linspace(2.1, 2.7, 7)
+    df2.to_csv(tmp_path / "second.csv", index=False)
+
+    kw = dict(tscale_input="GPS", unit_input="km", cd_col="cd")
+    sc = Spacecraft(state_file=tmp_path / "first.csv", **kw)
+    assert sc.N == 20
+    sd_old = sc.state_data
+
+    sc.load_from_file(tmp_path / "second.csv")
+    fresh = Spacecraft(state_file=tmp_path / "second.csv", **kw)
+
+    assert sc.N == 7
+    for name in ("sspice_et", "sspice_gps"):
+        np.testing.assert_array_equal(getattr(sc, name), getattr(fresh, name))
+    assert list(sc.sc_utc) == list(fresh.sc_utc)
+    np.testing.assert_allclose(sc.cd_arr, df2["cd"].to_numpy(), rtol=1e-15)
+    np.testing.assert_allclose(sc.state_ecef, state2, rtol=1e-12)
+    np.testing.assert_array_equal(sc.state_ecef, fresh.state_ecef)
+    sd = sc.state_data
+    assert sd is not sd_old
+    assert sd.N == len(sd.sspice_gps) == len(sd.cd) == 7
