@@ -26,7 +26,7 @@ import contigo.config as config
 from contigo.contigo_utils import utils
 from contigo.contigo_utils.time_utils import check_lpsk, spice_time
 
-LEAP_URL = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls"
+LEAP_URL = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/" + config.LEAP_FILE
 J2000 = pd.DatetimeIndex(["2000-01-01 12:00:00"])
 
 
@@ -71,10 +71,14 @@ def test_tu02_utc_to_gps_offsets(stamp, gps_minus_utc):
 
 
 def test_tu02_tai_gps_offset_is_19_seconds():
-    """TU-02: TAI - GPS = 19 s, the constant that TU-01 relies on (definition)."""
+    """TU-02: TAI - GPS = 19 s, the constant that TU-01 relies on (definition).
+
+    Tolerance 1e-6 s: the values are ~3e8 s from J2000, where one float64 ulp
+    is ~6e-8 s, so an exact 19 s difference cannot be asserted to 1e-9.
+    """
     assert _one("2010-03-04 05:06:07", "GPS", "TAI") - _one(
         "2010-03-04 05:06:07", "TAI", "TAI"
-    ) == pytest.approx(19.0, abs=1e-9)
+    ) == pytest.approx(19.0, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
