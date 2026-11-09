@@ -79,6 +79,7 @@ def test_sc02_unit_input_km():
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="NEW: Spacecraft.load_from_arrays keeps a view of the caller's state "
     "array and _normalize_units multiplies it in place for unit_input='km'",
 )
@@ -87,15 +88,17 @@ def test_sc02_km_does_not_mutate_input():
 
     Expected: a copy taken before construction equals the array afterwards.
     """
-    state_km = make_circular_orbit(n=10)[0] / 1000.0
+    state, time = make_circular_orbit(n=10)
+    state_km = state / 1000.0
     before = state_km.copy()
-    time = make_circular_orbit(n=10)[1]
     Spacecraft(state=state_km, time=time, tscale_input="GPS", unit_input="km")
     np.testing.assert_array_equal(state_km, before)
 
 
-def _bad_inputs():
-    state, time = make_circular_orbit(n=10)
+_BAD_STATE, _BAD_TIME = make_circular_orbit(n=10)
+
+
+def _build_bad_inputs(state, time):
     return {
         "no_tscale": dict(state=state, time=time),
         "bad_scale": dict(state=state, time=time, tscale_input="XYZ"),
@@ -114,7 +117,10 @@ def _bad_inputs():
     }
 
 
-@pytest.mark.parametrize("case", list(_bad_inputs()))
+BAD_INPUTS = _build_bad_inputs(_BAD_STATE, _BAD_TIME)
+
+
+@pytest.mark.parametrize("case", list(BAD_INPUTS))
 def test_sc03_bad_input_raises_value_error(case):
     """SC-03: invalid constructor input raises ``ValueError``.
 
@@ -123,7 +129,7 @@ def test_sc03_bad_input_raises_value_error(case):
     time alone, no input at all) or a sibling check in the same code path.
     """
     with pytest.raises(ValueError):
-        Spacecraft(**_bad_inputs()[case])
+        Spacecraft(**BAD_INPUTS[case])
 
 
 def test_sc04_property_broadcasting():
@@ -366,7 +372,7 @@ def test_sc07_split_by_id(sc_multi):
         state, time = make_circular_orbit(alt=alt, inc_deg=inc, n=200)
         assert sc.N == 200
         assert list(sc.unique_ids) == [sc_id]
-        assert (np.diff(sc.sspice_gps) == 10.0).all()
+        np.testing.assert_allclose(np.diff(sc.sspice_gps), 10.0, atol=1e-6)
         assert (sc.stime == time).all()
         np.testing.assert_array_equal(sc.state_ecef, state)
         np.testing.assert_array_equal(sc.cd_arr, np.full(200, cd))
@@ -431,26 +437,29 @@ def test_sc09_leap_seconds(utc, gps, offset):
     and the same ET.
     """
     state = make_circular_orbit(n=3)[0]
+    assert (pd.Timestamp(gps) - pd.Timestamp(utc)).total_seconds() == offset
     utc_t = pd.Timestamp(utc) + pd.to_timedelta([0, 10, 20], unit="s")
     gps_t = pd.Timestamp(gps) + pd.to_timedelta([0, 10, 20], unit="s")
     sc_utc = Spacecraft(state=state, time=utc_t, tscale_input="UTC")
     sc_gps = Spacecraft(state=state, time=gps_t, tscale_input="GPS")
     np.testing.assert_allclose(sc_utc.sspice_gps, sc_gps.sspice_gps, atol=1e-6)
     np.testing.assert_allclose(sc_utc.sspice_et, sc_gps.sspice_et, atol=1e-6)
-    # and the GPS axis really is the stamp itself: UTC + offset
+    # and the GPS axis really is the GPS stamp itself (UTC + offset)
     j2000 = pd.Timestamp("2000-01-01 12:00:00")
     np.testing.assert_allclose(
         sc_utc.sspice_gps, (gps_t - j2000).total_seconds(), atol=1e-6
     )
-    assert offset in (13, 18)
 
 
 def test_sc09_scale_offsets():
     """SC-09: TAI and GPS labels of the same stamps differ by 19 s.
 
     Expected: GPS = TAI - 19 s, so stamps labelled 'TAI' have GPS seconds 19 s
-    *smaller* than the same stamps labelled 'GPS'; their ET is 19 s larger, and
-    ET - TAI = 32.184 s (+ periodic term < 2 ms).
+    *smaller* than the same stamps labelled 'GPS' (the instant labelled TAI is
+    19 s ahead of the GPS-labelled one, so its GPS reading, TAI - 19 s, is the
+    same stamp minus 19 s); for the same reason the ET of the TAI-labelled
+    stamps is 19 s smaller, not larger. ET - TAI = 32.184 s (+ periodic term
+    < 2 ms), i.e. ET - GPS = 51.184 s on the TAI object's own GPS axis.
     """
     state, time = make_circular_orbit(n=4)
     gps = Spacecraft(state=state, time=time, tscale_input="GPS")
@@ -496,18 +505,32 @@ def test_sc10_spherical():
         ]
     )
     assert sph.shape == (6, 3)
-    np.testing.assert_allclose(sph, expected, rtol=0, atol=1e-9 * big)
+    np.testing.assert_allclose(sph[:, 0], expected[:, 0], rtol=0, atol=1e-3)  # m
+    np.testing.assert_allclose(sph[:, 1:], expected[:, 1:], rtol=0, atol=1e-12)  # rad
 
 
 # ---------------------------------------------------------------------------
 # SC-11, SC-11b: SP3 loader (synthetic files)
 # ---------------------------------------------------------------------------
-SP3_HEADER = (
-    "#cP2018  1  2  0  0  0.00000000       3 ORBIT IGb14 HLM  XXX\n"
-    "## 1983 259200.00000000   900.00000000 58120 0.0000000000000\n"
-    "%c L  cc GPS ccc cccc cccc cccc cccc ccccc ccccc ccccc ccccc\n"
-    "/* synthetic SP3 for contigo tests\n"
-)
+GPS_EPOCH = pd.Timestamp("1980-01-06")
+
+
+def _sp3_header(epochs) -> str:
+    """Header consistent with the body: position+velocity (``#cV``), the first
+    epoch, the GPS week / seconds of week, step, MJD and fractional day."""
+    t0 = epochs[0]
+    step = (epochs[1] - epochs[0]).total_seconds() if len(epochs) > 1 else 0.0
+    week, rem = divmod((t0 - GPS_EPOCH).total_seconds(), 7 * 86400.0)
+    mjd = (t0.normalize() - pd.Timestamp("1858-11-17")).days
+    frac = (t0 - t0.normalize()).total_seconds() / 86400.0
+    sec = t0.second + t0.microsecond / 1e6
+    return (
+        f"#cV{t0.year:4d} {t0.month:2d} {t0.day:2d} {t0.hour:2d} {t0.minute:2d} "
+        f"{sec:11.8f} {len(epochs):7d} ORBIT IGb14 HLM  XXX\n"
+        f"## {int(week):4d} {rem:15.8f} {step:14.8f} {mjd:5d} {frac:15.13f}\n"
+        "%c L  cc GPS ccc cccc cccc cccc cccc ccccc ccccc ccccc ccccc\n"
+        "/* synthetic SP3 for contigo tests\n"
+    )
 
 
 def _epoch_line(t: pd.Timestamp) -> str:
@@ -526,7 +549,7 @@ def _sat_lines(sat: str, pos_km, vel_dms) -> str:
 
 def _write_sp3(path, epochs, records) -> None:
     """``records[(epoch_index, sat)] = (pos_km, vel_dm_per_s)``."""
-    body = SP3_HEADER
+    body = _sp3_header(epochs)
     for i, t in enumerate(epochs):
         body += _epoch_line(t)
         for (j, sat), (pos, vel) in records.items():
@@ -558,6 +581,7 @@ def _si(rec):
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AttributeError,
     reason="F8/R8: df_sp3 calls fn.lower() on a Path (AttributeError) so SP3 "
     "files cannot be loaded through Spacecraft",
 )
@@ -580,6 +604,7 @@ def test_sc11_sp3_one_satellite(tmp_path):
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AttributeError,
     reason="F8/R8: df_sp3 calls fn.lower() on a Path and has a placeholder for "
     "multi-satellite epochs (time column never assigned)",
 )
@@ -605,6 +630,7 @@ def test_sc11_sp3_two_satellites(tmp_path):
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AttributeError,
     reason="F8/R8: df_sp3 fails on Path input; duplicate (ID, time) rows from "
     "overlapping SP3 files are also not yet dropped",
 )
@@ -630,7 +656,8 @@ def test_sc11b_overlapping_sp3_files_drop_duplicates(tmp_path):
     )
     assert sc.N == 5
     assert len(np.unique(sc.sspice_gps)) == 5
-    kept = sc.state_ecef[np.isclose(sc.sspice_gps, sc.sspice_gps[0] + 1800.0)]
+    offsets = sc.sspice_gps - sc.sspice_gps.min()
+    kept = sc.state_ecef[np.isclose(offsets, 1800.0, rtol=0, atol=1e-3)]
     assert len(kept) == 1
     np.testing.assert_allclose(kept[0], _si(rec1[(2, "L48")]), rtol=1e-12)
 
@@ -661,6 +688,7 @@ def test_sc12_state_data_cache(sc_single):
 
 @pytest.mark.xfail(
     strict=True,
+    raises=AssertionError,
     reason="NEW: load_from_arrays/load_from_file do not recompute the time axes "
     "(sspice_et, sspice_gps, sc_utc) or the unit conversion; only __post_init__ "
     "does, so a reload leaves stale axes of the old length",
@@ -676,3 +704,6 @@ def test_sc12_reload_refreshes_time_axes(sc_single):
     assert len(sc_single.sspice_gps) == 10
     assert len(sc_single.sspice_et) == 10
     assert len(sc_single.sc_utc) == 10
+    # the cached grouped view must carry the refreshed axes too
+    sd = sc_single.state_data
+    assert len(sd.sspice_gps) == sd.N == 10
