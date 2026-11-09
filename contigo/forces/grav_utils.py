@@ -80,6 +80,27 @@ def read_icgem_coeff(file_path: str, encoding: str = "ISO-8859-1"):
     return clm, slm, {"product": product, "r0": r0, "GM": gm, "lmax": lmax}
 
 
+def _check_lmax(clm, slm, lmax):
+    """Raise ValueError if lmax exceeds the coefficient arrays.
+
+    The Numba kernels have no bounds checks, so an lmax above the size of
+    the coefficient arrays would read past the end of them.
+    """
+    clm = np.asarray(clm)
+    slm = np.asarray(slm)
+    if clm.ndim != 2 or clm.shape != slm.shape:
+        raise ValueError(
+            f"clm and slm must be 2-D arrays of the same shape, got {clm.shape} "
+            f"and {slm.shape}"
+        )
+    max_deg = min(clm.shape) - 1
+    if lmax < 0 or lmax > max_deg:
+        raise ValueError(
+            f"lmax={lmax} is outside the coefficient arrays (maximum degree "
+            f"{max_deg})"
+        )
+
+
 def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     """Derive Gravitational Potential
 
@@ -113,7 +134,14 @@ def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     -------
     float
         Gravitational Potential (length^2/s^2)
+
+    Raises
+    ------
+    ValueError
+        If lmax exceeds the degree of the coefficient arrays, or clm and slm
+        have different shapes.
     """
+    _check_lmax(clm, slm, lmax)
     # Get normalized Legendre functions at the target latitude
     # Note: 'geodesy' normalization is required for EGM96
     theta = np.pi / 2 - lat  # Convert latitude (radians) to colatitude (radians)
@@ -218,7 +246,14 @@ def get_potential_batch(r, lat, lon, clm, slm, gm, r0, lmax=50):
     -------
     np.ndarray (N,)
         Gravitational potential at each position (m^2/s^2).
+
+    Raises
+    ------
+    ValueError
+        If lmax exceeds the degree of the coefficient arrays, or clm and slm
+        have different shapes.
     """
+    _check_lmax(clm, slm, lmax)
     N = len(r)
     theta = np.pi / 2 - lat  # (N,) colatitude
 

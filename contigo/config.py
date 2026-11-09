@@ -37,7 +37,9 @@ state = {
     "gmatpy": None,
     "kernel_downloaded": False,
     "pot_coef_loaded": False,
+    # Resolved full path (os.path.realpath) of the cached potential file
     "pot_file": None,
+    "pot_lmax": None,
     "pot_clm": None,
     "pot_slm": None,
     "pot_r0": None,

@@ -55,7 +55,9 @@ class GravPot:
         lmax : int, optional
             Maximum degree/order for deriving the gravitational potential.
             If lmax is larger than the max degree/order of the loaded potential
-            file then lmax is set to the file's maximum, by default 50
+            file then lmax is set to the file's maximum (on first load and when
+            the coefficients come from the ``config.state`` cache); None or 0
+            selects the file's maximum, by default 50
         """
         r = np.asarray(r)
         if r.ndim == 0:
@@ -76,13 +78,25 @@ class GravPot:
         self.lmax = lmax
         self.gravpot = None
 
-        # Modeled Field Variables Which are Loaded
-        if config.state["pot_coef_loaded"] is True and config.state[
-            "pot_file"
-        ] == os.path.basename(self.pot_file):
+        # Resolve the potential file: as given, else in the package data dir
+        if os.path.isfile(pot_file):
+            pass
+        elif os.path.isfile(os.path.join(config.DATA_DIR, self.pot_file)):
+            self.pot_file = os.path.join(config.DATA_DIR, self.pot_file)
+        else:
+            raise ValueError(f"Potential file {self.pot_file} cannot be found.")
 
+        # The coefficient cache is keyed on the resolved full path, so two
+        # different files with the same basename never share coefficients.
+        pot_key = os.path.realpath(self.pot_file)
+
+        # Modeled Field Variables Which are Loaded
+        if (
+            config.state["pot_coef_loaded"] is True
+            and config.state["pot_file"] == pot_key
+        ):
             logger.info(
-                "Loading potential coeffecients from current " "state which used %s.",
+                "Loading potential coeffecients from current state which used %s.",
                 config.state["pot_file"],
             )
 
@@ -90,23 +104,46 @@ class GravPot:
             self.slm = config.state["pot_slm"]
             self.r0 = config.state["pot_r0"]
             self.GM = config.state["pot_GM"]
-        elif os.path.isfile(pot_file):
-            self.load_coeff()
-        elif os.path.isfile(os.path.join(config.DATA_DIR, self.pot_file)):
-            self.pot_file = os.path.join(config.DATA_DIR, self.pot_file)
-            self.load_coeff()
+            file_lmax = config.state.get("pot_lmax")
+            if file_lmax is None:
+                file_lmax = self.clm.shape[0] - 1
+            self.lmax = self._clamp_lmax(self.lmax, file_lmax)
         else:
-            raise ValueError(f"Potential file {self.pot_file} cannot be found.")
+            self.load_coeff()
 
-    def load_coeff(self):
-        """Load ICGEM clm, slm potential coefficients.
+    @staticmethod
+    def _clamp_lmax(lmax, file_lmax):
+        """Return lmax limited to the maximum degree of the potential file.
 
         Parameters
         ----------
-        pot_file : str, optional
-            ICGEM potential file used to derive the gravitational
-            potential, uses .grav_utils.read_icgem_coeff which returns
-            clm, slm, and metadata, by default None
+        lmax : int or None
+            Requested maximum degree/order. None or 0 selects the file's lmax.
+        file_lmax : int
+            Maximum degree/order available in the potential file.
+
+        Returns
+        -------
+        int
+            The lmax to use.
+        """
+        if not lmax:
+            return file_lmax
+        if lmax > file_lmax:
+            logger.warning(
+                "Defined lmax is to large. Setting lmax to that in the "
+                "potential file (%d).",
+                file_lmax,
+            )
+            return file_lmax
+        return lmax
+
+    def load_coeff(self):
+        """Load ICGEM clm, slm potential coefficients from ``self.pot_file``.
+
+        Clamps ``self.lmax`` to the file's maximum degree and stores the
+        coefficients in ``config.state``, keyed on the resolved full path of
+        the file.
         """
         logger.info("Loading potential file %s", self.pot_file)
 
@@ -114,22 +151,18 @@ class GravPot:
         self.r0 = cs_meta["r0"]
         self.GM = cs_meta["GM"]
         # check the lmax of the potential file
-        if not self.lmax:
-            self.lmax = cs_meta["lmax"]
-        elif self.lmax > cs_meta["lmax"]:
-            print("Defined lmax is to large.")
-            print("Setting lmax to that in the potential file.")
-            self.lmax = cs_meta["lmax"]
+        self.lmax = self._clamp_lmax(self.lmax, cs_meta["lmax"])
 
         # Set potential state variables
         # so we don't have to keep loading
         # coeffecients
-        config.state["pot_file"] = os.path.basename(self.pot_file)
+        config.state["pot_file"] = os.path.realpath(self.pot_file)
         config.state["pot_coef_loaded"] = True
         config.state["pot_clm"] = self.clm
         config.state["pot_slm"] = self.slm
         config.state["pot_r0"] = self.r0
         config.state["pot_GM"] = self.GM
+        config.state["pot_lmax"] = cs_meta["lmax"]
 
     def calc_pot(self):
         """Derive Potential.
@@ -175,11 +208,15 @@ class GravPot:
         -------
         np.array
             Array of potetial in m^2/s^2
+
+        Raises
+        ------
+        ValueError
+            If ``calc_pot()`` has not been called.
         """
-        if hasattr(self, "gravpot"):
-            return self.gravpot
-        else:
-            raise ValueError("Potential needs to be calculated.")
+        if self.gravpot is None:
+            raise ValueError("Potential needs to be calculated; call calc_pot() first")
+        return self.gravpot
 
 
 class EarthPotential(ForceModel):
