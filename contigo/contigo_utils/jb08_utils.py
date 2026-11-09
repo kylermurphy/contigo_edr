@@ -27,11 +27,16 @@ Two coordinate systems are supported via the ``coords`` keyword:
 All nine space weather parameters are keyword-only and must either all be
 supplied or all omitted — passing a partial set raises ``ValueError``.
 
+Importing this module does not start the JVM: Orekit is started (and its Java
+classes imported) on the first call to ``jb2008_density``, after its inputs
+have been validated, so invalid input raises ``ValueError`` without Java.
+
 added: 29/05/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 from __future__ import annotations
 
+import functools
 from datetime import datetime
 from typing import Literal, Sequence
 
@@ -39,14 +44,6 @@ import numpy as np
 import numpy.typing as npt
 
 import contigo.config as config
-
-if config.state["orekit_loaded"] is False:
-    from contigo.contigo_utils import orekit_utils
-
-    orekit_utils.start_orekit()
-
-from org.contigo.orekit_utils import JB2008DensityBatchHelper
-from org.orekit.time import AbsoluteDate, TimeScalesFactory
 
 # All nine JB2008 space weather parameter names in the order accepted by
 # JB2008DensityBatchHelper.getDensity.
@@ -56,6 +53,25 @@ _VALID_COORDS = {"ecef", "geodetic"}
 
 # JB2008 minimum altitude threshold (metres) enforced by Orekit.
 _JB2008_ALT_MIN_M = 90_000.0
+
+
+@functools.lru_cache(maxsize=1)
+def _java():
+    """Start Orekit if needed and return the Java classes used here.
+
+    Returns ``(AbsoluteDate, TimeScalesFactory, JB2008DensityBatchHelper)``.
+    Cached, so the JVM start and Java imports happen on first use only.
+    """
+    if config.state["orekit_loaded"] is False:
+        from contigo.contigo_utils import orekit_utils
+
+        orekit_utils.start_orekit()
+
+    # Java imports deferred until JVM is running
+    from org.contigo.orekit_utils import JB2008DensityBatchHelper
+    from org.orekit.time import AbsoluteDate, TimeScalesFactory
+
+    return AbsoluteDate, TimeScalesFactory, JB2008DensityBatchHelper
 
 
 def _validate_geodetic(positions: npt.NDArray[np.float64]) -> None:
@@ -237,6 +253,9 @@ def jb2008_density(
 
     if geodetic:
         _validate_geodetic(positions)
+
+    # Inputs are valid: start the JVM (first call only) and get Java classes.
+    AbsoluteDate, TimeScalesFactory, JB2008DensityBatchHelper = _java()
 
     # Build Orekit AbsoluteDate from the first epoch, then express all
     # subsequent epochs as second offsets from it.
