@@ -14,7 +14,7 @@ from contigo.constellation import Constellation
 from contigo.forces.base import ForceModel
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
-from .grav_utils import get_potential_batch, read_icgem_coeff
+from .grav_utils import get_potential_batch, read_icgem_coeff, resolve_pot_file
 
 logger = logging.getLogger(__name__)
 
@@ -50,14 +50,24 @@ class GravPot:
             by default np.array(np.pi,ndmin=1)
         pot_file : str, optional
             ICGEM potential file used to derive the gravitational
-            potential, uses .grav_utils.read_icgem_coeff which returns
-            clm, slm, and metadata, by default 'EIGEN-2.gfc'
+            potential (read with .grav_utils.read_icgem_coeff), by default
+            'EIGEN-2.gfc'. Accepted values: the bundled 'EIGEN-2.gfc';
+            'EGM2008.gfc' or 'EIGEN-6C4.gfc', downloaded from ICGEM on first
+            use into ``config.cache_dir("gravity")`` (~430 MB in total, see
+            .grav_utils.fetch_icgem); or a path to any ICGEM .gfc file.
+            Resolved with .grav_utils.resolve_pot_file.
         lmax : int, optional
             Maximum degree/order for deriving the gravitational potential.
             If lmax is larger than the max degree/order of the loaded potential
             file then lmax is set to the file's maximum (on first load and when
             the coefficients come from the ``config.state`` cache); None or 0
             selects the file's maximum, by default 50
+
+        Raises
+        ------
+        PotentialFileNotFound
+            (a ValueError) if the file cannot be found or downloaded, e.g.
+            with ``CONTIGO_OFFLINE`` set.
         """
         r = np.asarray(r)
         if r.ndim == 0:
@@ -78,13 +88,10 @@ class GravPot:
         self.lmax = lmax
         self.gravpot = None
 
-        # Resolve the potential file: as given, else in the package data dir
-        if os.path.isfile(pot_file):
-            pass
-        elif os.path.isfile(os.path.join(config.DATA_DIR, self.pot_file)):
-            self.pot_file = os.path.join(config.DATA_DIR, self.pot_file)
-        else:
-            raise ValueError(f"Potential file {self.pot_file} cannot be found.")
+        # Resolve the potential file: as given, else in the current dir, the
+        # gravity cache or the bundled data; registered ICGEM models are
+        # downloaded into the cache on first use.
+        self.pot_file = str(resolve_pot_file(pot_file))
 
         # The coefficient cache is keyed on the resolved full path, so two
         # different files with the same basename never share coefficients.
@@ -237,7 +244,9 @@ class EarthPotential(ForceModel):
         Parameters
         ----------
         pot_file : str, optional
-            ICGEM potential file to use, by default 'EIGEN-2.gfc'
+            ICGEM potential file to use, by default 'EIGEN-2.gfc'. See
+            ``GravPot`` for the accepted names ('EGM2008.gfc' and
+            'EIGEN-6C4.gfc' are downloaded on first use).
         lmax : int, optional
             Maximum degree of the spherical harmonic expansion, by default 50
         """
