@@ -70,8 +70,8 @@ These affect Phase 0 directly. Each one links to a test or refactor ID.
 | F3 | `pandas.read_hdf` needs **PyTables** (`tables`), which is not declared. `h5py` is declared but never imported | `pyproject.toml` | 0.1 |
 | F4 | `forces/srp_orekit.py` **starts the JVM and contacts GitLab at import time**. Any test collection or `import` that reaches it needs Java and the network | `srp_orekit.py` | R3, PK-01 |
 | F5 | `SPICEEphem.load_kernels()` sends an HTTP HEAD request to NAIF on first use, even when every kernel is already bundled. `start_orekit()` always queries the GitLab API | `spice_ephem.py`, `orekit_utils.py` | R11 (offline switch), test fixture |
-| F6 | `ForceModel` Protocol declares `is_conservative: bool`, but no model defines it. Because the Protocol is `@runtime_checkable`, `isinstance(model, ForceModel)` returns **False** for every model | `forces/base.py` | FO-09, R6 |
-| F7 | `GravPot.get_pot()` returns `None` and does not raise when `calc_pot()` was never called (`gravpot` is set to `None` in `__init__`, so the `hasattr` check always passes). When coefficients come from the `config.state` cache, `lmax` is not clamped to the file maximum | `grav_pot.py` | FO-07, R7 |
+| F6 | `ForceModel` Protocol declares `is_conservative: bool`, but no model defines it. *(Corrected by T5:)* the real models subclass `ForceModel`, so `isinstance` is True for them; but `model.is_conservative` raises `AttributeError`, and duck-typed models that do not subclass fail `isinstance` | `forces/base.py` | FO-09, R6 |
+| F7 | `GravPot.get_pot()` returns `None` and does not raise when `calc_pot()` was never called (`gravpot` is set to `None` in `__init__`, so the `hasattr` check always passes). When coefficients come from the `config.state` cache, `lmax` is not clamped to the file maximum, so the Numba kernel (no bounds checks) can **read past the coefficient arrays** (garbage or crash), not just use a wrong setting | `grav_pot.py` | FO-07, R7 |
 | F8 | SP3 loading is broken: `df_sp3` calls `fn.lower()` on a `Path`, accepts no `**kwargs`, and has a placeholder for multi-satellite epochs | `utils.py`, `spacecraft.py` | SC-11, R8 |
 | F9 | `CONTIGO_Colab.ipynb` no longer runs. It imports `ThirdBody` (which does not exist) and passes `sp_et=`/`sp_gps=` to `SolarSystemEnvironment` (now `ephem_time=`/`gps_time=`/`utc_time=`) | notebook | NB-01, N2 |
 | F10 | `config.py` calls `logging.basicConfig` at import, which changes the user's root logger. Several modules use `print` | `config.py`, `orekit_utils.py`, `grav_pot.py` | R4 |
@@ -81,6 +81,16 @@ These affect Phase 0 directly. Each one links to a test or refactor ID.
 | F14 | `forces/__init__.py` has the third-body module docstring pasted in | `forces/__init__.py` | R12 |
 | F15 | `time_utils.spice_time` does not upper-case `out_scale` and loops over `unitim` element by element | `time_utils.py` | TU-03, R10 |
 | F16 | Downloads (Orekit data, ICGEM `.gfc`, SPICE kernels) are written to `contigo/data`. In a non-editable install that is inside site-packages, which can be read-only and is wiped on upgrade | `config.py` | R16 |
+| F18 | ~~Possible SRP units mismatch~~ **Resolved (T5): notebook artefact.** `SRPOrekitCB` returns m/s² (1.974e-8 m/s² for ESA, equal to Cr·P·A/m·(AU/d)² to 1e-6, anti-sunward). The notebooks loaded the km file `ESA_pod.hdf` without `unit_input='km'` | notebooks | FO-11 |
+| F19 | `Spacecraft(state=arr, unit_input='km')` multiplies the **caller's** array by 1000 in place (`np.asarray` returns a view at `spacecraft.py:150`; `*=` at `:319`) | `spacecraft.py` | SC-02, R17 |
+| F20 | `load_from_arrays()` / `load_from_file()` do not recompute `sspice_et`, `sspice_gps`, `sc_utc` or the km conversion; only `__post_init__` does, so a reload leaves time axes of the old length | `spacecraft.py` | SC-12, R17 |
+| F21 | `SolarSystemEnvironment._load_times`: several requested times in the same uncached bin are all sent to the provider and the last one is cached (duplicate work; cached value depends on request order) | `solar_system_ephem.py` | EP-04, R18 |
+| F22 | `EDRDensity.compute_edr` stores accelerations by `model.name` (`edr_efd.py:200`), so two force models with the same `name` overwrite each other and only the last is integrated, silently | `edr_efd.py` | ED (xfail), R18 |
+| F23 | `ThirdBodyAcc.calc_tba` reads `self.stime.tzinfo` (`third_body_acc.py:137`); a pandas Series (including the class's own default `stime`) has no `.tzinfo` → `AttributeError` | `third_body_acc.py` | FO-12, R9 |
+| F24 | `contigo_utils/jb08_utils.py` also **starts the JVM and contacts GitLab at import** (module-level `start_orekit()` and `org.*` imports, lines 44–47), same pattern as F4 | `jb08_utils.py` | PK-01c, R3 |
+| F25 | `time_utils.spice_time(t, 'UTC', 'UTC')` raises `SpiceBADTIMETYPE` (`unitim(..., 'ET', 'UTC')`; UTC is not a `unitim` scale); error message typo "implmented" | `time_utils.py` | R10 |
+| F26 | EFD windows: `i1 = searchsorted(end) − 1` excludes the sample at the window end, so a 900 s window spans 890 s (pinned by ED-05 as current behaviour). **[OPEN]** intended? | `edr_efd.py` | ED-05 |
+| F27 | Orekit's stored Moon acceleration (`ore_d.hdf`) is a constant 3.4e-7 smaller than CONTIGO's, even with Orekit's own Moon positions, implying a lunar GM ~3.4e-7 smaller in that Orekit run than DE440's 4902.800118 km³/s². Constants difference, not a bug | reference data | FO-14 |
 | F17 | The `orekit` extra is a direct `git+https` URL, which PyPI rejects on upload. It is probably redundant because `start_orekit()` downloads the data itself | `pyproject.toml` | R16 |
 
 ---
@@ -151,7 +161,7 @@ test turns green, and CI forces removal of the marker, when the matching refacto
 | `sc_single`, `sc_multi` | `Spacecraft` from arrays; `sc_multi` has 3 IDs with **shuffled** times and per-ID properties |
 | `constellation_fixture` | `Constellation(sc_multi)` |
 | `FakeProvider` / `FakePotential` / `FakeForce` | Call-counting ephemeris provider; point-mass potential `GM/r`; force `a = −k·v` |
-| `esa_pod_small`, `orekit_edr_small` | Trimmed ~2 orbits (~1,100 rows at 10 s) of `data/ESA_pod.hdf` and the matching rows of `data/ore_d.hdf`, saved as `tests/data/*.csv.gz` (< 500 KB total), plus `tests/data/make_fixtures.py` that regenerates them |
+| `esa_pod_small`, `orekit_ref_small` | Trimmed ~2 orbits (~1,100 rows at 10 s) of `data/ESA_pod.hdf` and the matching rows of `data/ore_d.hdf`, saved as `tests/data/*.csv.gz` (< 500 KB total), plus `tests/data/make_fixtures.py` that regenerates them. `ore_d.hdf` stores Orekit's results as columns: `earth_gp`, Sun/Moon ECEF positions (`ecef_sn_p*`, `ecef_mn_p*`) and accelerations (`ecef_sn_a*`, `ecef_mn_a*`), ECI state (`eci_*`), `edr`, `denom`. So **CONTIGO-vs-Orekit comparisons run in the fast tier with no JVM**. Note the column name `ecef_vx,` (with a trailing comma) in `ore_d.hdf` |
 
 ### 4.1 Spacecraft (`tests/test_spacecraft.py`, PR **T1**)
 
@@ -161,13 +171,15 @@ test turns green, and CI forces removal of the marker, when the matching refacto
 | SC-02 | `unit_input='km'` | positions and velocities × 1000 |
 | SC-03 | Bad input | `ValueError` for: no `tscale_input`, bad scale, state `(N,5)`, length mismatch, state without time, neither arrays nor file |
 | SC-04 | Property broadcasting | scalar → `(N,)`; length-N array kept; wrong length → `ValueError`; missing → NaN |
-| SC-05 | CSV and HDF loaders (written to `tmp_path`) | custom column names, glob over 2 files, `sc_id_col='filename'` + `sc_fn_slc` |
+| SC-05 | CSV and HDF loaders (written to `tmp_path`) | custom column names, glob over 2 files, `sc_id_col='filename'` + `sc_fn_slc`; **zipped `.csv.zip`**, and a list mixing zipped and plain CSVs (from `testing_sc` cells 12–13) |
+| SC-04b | Property columns (`cd_col`, `drag_area_col`, `sc_mass_col`, `cr_col`, `srp_area_col`) | values read from the file; an explicit scalar kwarg takes precedence over the column (from `testing_sc` cell 14) |
 | SC-06 | Loader errors | missing column → `ValueError`; no files → `FileNotFoundError`; unknown extension → `ValueError` |
 | SC-07 | `split_by_id` | one object per ID, each sorted by GPS time, properties sliced consistently, total N preserved |
 | SC-08 | Time axes | GPS input: `|sspice_et − sspice_gps − 51.184| < 2e-3` s |
 | SC-09 | Leap seconds | UTC 2017-01-01T00:00:00 equals GPS 2017-01-01T00:00:18 (and +13 s in 2005, the CHAMP era) |
 | SC-10 | `spherical()` | known points on the x-axis, y-axis and pole → `[r, lat, lon]` |
 | SC-11 | SP3 loader (synthetic 1-sat and 2-sat SP3 in `tmp_path`) | km → m, dm/s → m/s, correct epochs. **xfail** until R8 |
+| SC-11b | Overlapping SP3 files (same satellite and epoch in two daily files, as in `testing_champ` cell 7) | **[DECISION]** duplicates on (ID, time) are dropped when loading, keeping the first. **xfail** until R8 |
 | SC-12 | `state_data` cache | invalidated after `load_from_arrays` |
 
 ### 4.2 Constellation (`tests/test_constellation.py`, PR **T1**)
@@ -195,12 +207,14 @@ test turns green, and CI forces removal of the marker, when the matching refacto
 
 | ID | Test | Expected |
 |----|------|----------|
-| EP-01 | `SPICEEphem` Sun/Moon | shape `(B,N,3)` in metres; Sun 1.471e11 to 1.521e11 m; Moon 3.56e8 to 4.07e8 m |
+| EP-01 | `SPICEEphem` Sun/Moon | shape `(B,N,3)` in metres; Sun **1.470e11** to 1.521e11 m (the ESA epochs are at perihelion, 1.47098e11 m); Moon 3.56e8 to 4.07e8 m |
 | EP-02 | Duplicate epochs | identical rows (unique/inverse logic) |
 | EP-03 | `load_kernels` twice | no duplicate furnsh |
 | EP-04 | `SolarSystemEnvironment` cache (FakeProvider) | repeated times → 0 extra provider calls; only missing bins requested; tolerance binning; `tolerance=None` and `0.0`; `N=1` case |
 | EP-05 | GM lookup | from `provider.ephemeris`; unknown body raises (proposed: clear `ValueError`) |
-| EP-06 | `orekit` | `OrekitEphem` and `SPICEEphem` Sun/Moon agree to within ~1 km (**[DECISION]**) |
+| EP-01b | Through `SolarSystemEnvironment` | bit-identical to a direct `spice.spkpos(body, et, 'ITRF93', 'NONE', 'EARTH')` × 1000 (`testing_ephem` cell 13) |
+| EP-06 | **Fast tier** (stored Orekit columns): `SPICEEphem` Sun/Moon vs `orekit_ref_small` `ecef_sn_p*`/`ecef_mn_p*` | *(Corrected by T3.)* Moon < 1 km (measured 11.4 m), **Sun < 10 km** (measured 4.56 km), distances < 1 m (measured mm). SPICE ITRF93 and Orekit's ITRF differ by a ~3e-8 rad rotation, so the offset scales with distance; a flat 1 km cannot hold for the Sun |
+| EP-06b | `orekit` (live JVM): `OrekitEphem` vs `SPICEEphem`, and `ThirdBodyEnv` accelerations from each | positions with EP-06 tolerances; accelerations compared by vector norm, relative < 1e-6 (element-wise rtol fails on near-zero components) (`testing_orekit_ephem` cell 12). Passes in a live run |
 
 ### 4.5 Forces (`tests/forces/`, PRs **T4**, **T5**)
 
@@ -216,7 +230,9 @@ test turns green, and CI forces removal of the marker, when the matching refacto
 | FO-08 | `EarthPotential` | dict of `(N,)` arrays; `acceleration` → `NotImplementedError` |
 | FO-09 | Protocol conformance | `isinstance(m, ForceModel)` for every model (**xfail**, R6) |
 | FO-10 | ~~GMAT SRP~~ | **ToDo, not written** (P10, §4.8) |
-| FO-11 | `orekit` | `SRPOrekitCB` shape `(N,3)`; roughly anti-sunward; magnitude consistent with `Cr·A/m` (~4.56e-6 N/m² at 1 AU) |
+| FO-11 | `orekit` | `SRPOrekitCB` shape `(N,3)`; roughly anti-sunward; magnitude consistent with `Cr·P·A/m` (P ≈ 4.56e-6 N/m² at 1 AU). For ESA (Cr 1.8, A 1 m², m 430 kg) that is **≈ 1.9e-8 m/s²**. **Check units:** the notebook printed `SRPOrekitCB` values of ~1.4e-11 at row 1000, which is the size of a km/s² value. That points to either a units bug or a notebook artefact (F18) |
+| FO-13 | `EarthPotential` (EIGEN-2, lmax 100) vs `orekit_ref_small['earth_gp']` | *(T4)* measured **2.6e-16** relative (the notebook's ~1e-9 was display rounding); asserted at rtol 1e-10 for portability of the Numba fastmath kernel across the CI matrix (`testing_force_model_constellation` cell 8, `testing_forces` cell 15) |
+| FO-14 | `ThirdBodyEnv` (SPICE) Sun and Moon vs `orekit_ref_small` `ecef_sn_a*`/`ecef_mn_a*` | `allclose` default; row 0 snapshot Sun `[-9.00593868e-08, 2.80000065e-07, 9.67684671e-09]`, Moon `[-1.81861563e-07, 7.29546172e-07, 5.87371096e-08]` m/s² (`testing_forces` cells 15, 18) |
 | FO-12 | `ThirdBodyAcc` | equals `ThirdBodyEnv` result; after R9, emits `DeprecationWarning` |
 
 ### 4.6 EDR / EFD (`tests/test_edr_efd.py`, PR **T6**)
@@ -231,10 +247,11 @@ EDR must stay at zero.
 | ED-02 | Equatorial orbit + `FakeForce(a=−k·v)` | `EDR(t) = k·|v_ecef|²·t` (checks the sign convention and the Simpson integration) |
 | ED-03 | One `(B,N,3)` force vs B separate `(N,3)` forces | identical EDR |
 | ED-04 | `compute_denom`, constant `b` and `|v|` | `b·|v|³·t` |
-| ED-05 | `compute_den` | window count `floor(T/window)`; midpoint `DateTime`; `efd = −2k/(b|v|)` for ED-02/ED-04 inputs; mismatched keys → `ValueError` |
+| ED-05 | `compute_den` | window count `floor(T/window)`; midpoint `DateTime`; `efd = −2k/(b|v|)` for ED-02/ED-04 inputs; mismatched keys → `ValueError`. Pins the 890 s span of F26 |
 | ED-06 | Constructor | warms the env cache with exactly one provider call |
 | ED-07 | Regression snapshot (`esa_pod_small`, ThirdBodyEnv+SPICE, EarthPotential EIGEN-2 lmax 50) | matches `tests/data/edr_snapshot.npz` (rtol 1e-10). Mark `slow` if it takes over 10 s |
-| ED-08 | `orekit` validation: full `ESA_pod` vs `ore_d`, the CONTIGO_Colab check but with `SRPOrekitCB` in place of GMAT `SRPAcc` | `allclose(atol=1e-7, rtol=0.1)`. **[DECISION]** keep it loose for now; tighten later |
+| ED-09 | `compute_denom` (Cd 3.5, A 1.1 m², m 430 kg as in the Colab notebook) vs `orekit_ref_small['denom']` | *(T6)* Orekit `denom` is **SI** (no 1000⁵ factor); measured 9.2e-7 relative, asserted at rtol 1e-5 (`test_edr_efd` cell 15). Fast tier |
+| ED-08 | `orekit` validation: full `ESA_pod` vs `ore_d`, the CONTIGO_Colab check but with `SRPOrekitCB` in place of GMAT `SRPAcc` | `allclose(atol=1e-7, rtol=0.1)`. **[DECISION]** keep it loose for now; tighten later. Evidence for tightening: `testing_forces` cell 22 (with GMAT SRP) matched Orekit's EDR to ~15 significant figures |
 
 > ED-07 is a *regression* test (did the output change?), not a *validation* test (is it right?).
 > ED-01/02/04/05 and ED-08 provide the validation.
@@ -245,6 +262,7 @@ EDR must stay at zero.
 |----|------|----------|
 | PK-01 | Import every submodule (`pkgutil.walk_packages`) | no import starts the JVM (`jpype.isJVMStarted()` stays False). `srp_orekit` is **xfail** until R3 |
 | PK-02 | CI `install` job | non-editable install imports and finds data and the jar |
+| PK-03 | `orekit`: `start_orekit()` starts the JVM and sets `config.state['orekit_loaded']` (`testing_champ` cell 3) | JVM running afterwards |
 | NB-01 | Every `from contigo... import X` in `notebooks/tutorials/*.ipynb` resolves (static parse, no execution) | catches F9-type breakage. `CONTIGO_Colab` is **xfail** until N2 |
 
 ### 4.8 Out of scope for Phase 0 (later)
@@ -256,6 +274,43 @@ end-to-end (`nbmake`, local `--run-all` only), performance benchmarks.
 FO-10 (`SRPAcc`/`SRPGMATAcc` direction and magnitude), GMAT vs Orekit SRP agreement,
 `srp_utils.setup_gmat` path handling, the GMAT route of ED-08. PK-01 still imports `srp_gmat`
 (the import does not load GMAT), so the module keeps working until a decision is made.
+From the notebooks: GMAT SRP norm vs `ESA_pod` `srp_*` (~1.97e-11 km/s²), the four-way GMAT/Orekit
+SRP comparison (~0.1 % apart), and an SRP scaling check (`testing_forces` cells 37–38). That
+scaling check is itself suspect: it reuses `x.get_ecef_acc()` for y/z, and Cr×10 gave ×100.
+
+**Reference data for Kyle's task 0.3 (`ecef_to_inertial`):** `ESA_pod.hdf` has GMAT ECI states
+(`eci_*`) next to the ECEF state, and `ore_d.hdf` has Orekit ECI states. Both are ready-made
+references for an ECEF-to-J2000 round-trip test (frame differences of order metres expected:
+ITRF93/J2000 in SPICE vs GMAT MJ2000Eq vs Orekit EME2000).
+
+### 4.9 Notebook mining results (2026-11-09)
+
+Three Sonnet `Explore` agents read all 10 notebooks. Main points:
+
+- No notebook contains an `assert`. Checks are printed values, `np.allclose` and plots. The rows
+  above now cite their source cell.
+- The stored Orekit columns in `ore_d.hdf` allow fast-tier comparisons (EP-06, FO-13, FO-14,
+  ED-09), which the v1 catalogue only had in the `orekit` tier.
+- APIs used by notebooks that no longer exist: `third_body_acc.ThirdBody`,
+  `contigo.contig_utils`, `contigo.forces.srp_acc`, `SolarSystemEnvironment(sp_et=, sp_gps=)`,
+  3-value `get_ephem`, and `SPICEEphem(et=...)`.
+- New finding **F18**: possible SRP units mismatch in `SRPOrekitCB` (see FO-11); T5 checks it.
+
+Updated fates (**[DECISION]**, agreed 2026-11-09; these replace the §5.1 table):
+
+| Notebook | Fate | Condition / reason |
+|----------|------|--------------------|
+| `testing_sc` | **delete** | covered once SC-04b and the SC-05 zip cases exist |
+| `testing_force_model_constellation` | **delete** | covered by FO-13, FO-14; its GMAT cell is a GMAT ToDo; it is broken (`ThirdBody`) |
+| `testing_ephem` | **delete** | covered by EP-01/01b, EP-04, FO-01/02/12, FO-14; broken (old `SolarSystemEnvironment` API) |
+| `testing_orekit_ephem` | **delete** | covered by EP-06/06b, FO-11; its GMAT comparison is a GMAT ToDo |
+| `test_edr_efd` | **delete** | covered by ED-08, ED-09, FO-12; broken (`ThirdBody`, `SPICEEphem(et=)`) |
+| `testing_forces` | **archive** | EFD vs TOLEOS/POD plots and GMAT checks are not testable as written |
+| `testing_swarm` | **archive** | SWARM-B validation on `D:\` data with the external `data_io`; several cells broken |
+| `testing_champ` | **archive** | CHAMP vs TOLEOS on `D:\` data; cell 10 generated the bundled `CHAMP_POD_*.hdf` (keep as provenance) |
+| `champ_stats` | **analysis/** | CHAMP 2010 density-model benchmark (HASDM, JB08, MSIS) |
+
+A notebook is deleted only in the PR that adds the tests covering it, so nothing is lost before its replacement exists.
 
 ---
 
@@ -267,14 +322,16 @@ Each refactor lands **after** the tests that cover it, in its own PR, and remove
 |----|--------|----------|----------|
 | R1 | Unstage the big `.gfc` files (Kyle) | **Now** | pushing |
 | R2 | ICGEM download on demand: a small registry `{name: url}` in `grav_utils`; `GravPot` downloads into `DATA_DIR` when the file is missing; delete the duplicate `data/EIGEN-2.gfc` | High | P1 |
-| R3 | `srp_orekit.py`: move the JVM start and Java imports into `__init__` (same pattern as `OrekitEphem`) | High | PK-01, CI |
+| R3 | `srp_orekit.py` **and `jb08_utils.py` (F24)**: move the JVM start and Java imports into the class/function that needs them (same pattern as `OrekitEphem`) | High | PK-01, CI |
 | R4 | `config.py`: drop `logging.basicConfig`; replace `print` with `logger` | Medium | |
 | R5 | `orekit_utils`: jar via `importlib.resources`; if GitLab is unreachable, use the newest local `orekit_data_*.zip`; raise instead of returning an error string on 404; untrack `contigo/data/orekit_data_*.zip` (add to `.gitignore`) | High | non-editable install, offline use |
-| R6 | `ForceModel.is_conservative`: **[PROPOSED]** remove it from the Protocol (nothing reads it) | Medium | FO-09 |
-| R7 | `GravPot`: raise in `get_pot` when nothing is computed; clamp `lmax` on the cached path; key the cache on the full path | Medium | FO-07 |
+| R6 | `ForceModel.is_conservative`: **[PROPOSED]** remove it from the Protocol (nothing reads it); fixes both parts of F6 | Medium | FO-09 |
+| R7 | `GravPot`: raise in `get_pot` when nothing is computed; clamp `lmax` on the cached path; key the cache on the full path | **High** (out-of-bounds read in Numba, F7) | FO-07 |
 | R8 | `df_sp3`: accept `Path`, `**kwargs`, multi-satellite epochs (track the current epoch inside the parse loop) | Medium, **fix now** (**[DECISION]**) | SC-11 |
 | R9 | **Deprecate `ThirdBodyAcc`**: `DeprecationWarning` in 0.2.0 pointing to `ThirdBodyEnv`; remove in 0.3.0. Keep `GravPot` (the engine behind `EarthPotential`) and scalar `get_potential` (useful as the reference in FO-06). `SRPGMATAcc` is handled by R15 | Medium | FO-12 |
-| R10 | `time_utils`: upper-case `out_scale`; numpy docstrings; vectorisation optional | Low | TU-03 |
+| R10 | `time_utils`: upper-case `out_scale`; UTC→UTC path and message typo (F25); numpy docstrings; vectorisation optional | Low | TU-03 |
+| R17 | `Spacecraft`: copy input arrays before unit conversion (F19); make `load_from_arrays`/`load_from_file` run the same normalisation as `__post_init__` (time axes, units) (F20) | High (silent wrong numbers) | SC-02, SC-12 xfails |
+| R18 | `SolarSystemEnvironment`: request each missing bin once (F21). `EDRDensity`: key accelerations by position or reject duplicate model names (F22) | Medium | EP-04, ED xfail |
 | R11 | `CONTIGO_OFFLINE=1` env switch read in `config`: skips the NAIF mtime check and the GitLab SHA query, using local files | High | CI determinism, Colab cold start |
 | R12 | Fix the `forces/__init__.py` docstring; add `contigo.__version__` | Low | |
 | R13 | Mechanical `ruff --fix` + `black` over `contigo/`, then empty the ruff exclude list | Medium (separate PR, no logic changes) | strict lint |
