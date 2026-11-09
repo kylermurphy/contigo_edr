@@ -18,19 +18,24 @@ added: 09/11/2026 Claude Code
 from __future__ import annotations
 
 import warnings
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
+from _support import ESA_PROPS, FakeProvider, make_circular_orbit
 
+from contigo.constellation import Constellation
 from contigo.contigo_utils.constants import jpl_de440
 from contigo.ephemeris.spice_ephem import SPICEEphem
 from contigo.forces.tba_utils import tba_pairwise_numba
 from contigo.forces.third_body_acc import ThirdBodyAcc, ThirdBodyEnv
 from contigo.solar_system_ephem import SolarSystemEnvironment
+from contigo.spacecraft import Spacecraft
 
 BODIES = ["SUN", "MOON"]
-GPS_MINUS_UTC_2018 = pd.Timedelta(seconds=18)
+#: origin of ``Spacecraft.sspice_gps`` (seconds past J2000 in the GPS scale)
+J2000_GPS_LABEL = pd.Timestamp("2000-01-01 12:00:00")
 
 #: Row 0 of the SPICE third-body accelerations printed in the
 #: ``testing_forces`` notebook (cells 15, 18), m/s^2, 9 significant digits.
@@ -48,22 +53,47 @@ def _tba_numpy(r_sat, r_bodies, mu_bodies):
     return mu_bodies[:, None, None] * (rho / rho3 - r_bodies / rb3)
 
 
-@pytest.fixture
-def spice_env() -> SolarSystemEnvironment:
-    """Sun + Moon from the bundled de440s kernel, ITRF93, Earth-centred."""
-    return SolarSystemEnvironment(
+@pytest.fixture(scope="module")
+def esa_spice(esa_pod_small):
+    """ESA spacecraft, SPICE environment and ``ThirdBodyEnv`` result, once.
+
+    The constellation is built exactly as conftest's ``esa_constellation``
+    (``unit_input='km'``, ESA properties, GPS labels). The environment holds
+    Sun + Moon from the bundled de440s kernel, ITRF93, Earth-centred.
+    Treat the returned arrays as read-only.
+    """
+    df = esa_pod_small
+    sc_in = Spacecraft(
+        state=df[["x", "y", "z", "vx", "vy", "vz"]].to_numpy(),
+        time=df["DateTime"],
+        sc_id_input=np.full(len(df), "ESA"),
+        tscale_input="GPS",
+        unit_input="km",
+        **ESA_PROPS,
+    )
+    con = Constellation(spacecraft=sc_in)
+    env = SolarSystemEnvironment(
         BODIES,
         tolerance=0.01,
         provider=SPICEEphem(ephemeris="de440s", frame="ITRF93", observer="EARTH"),
     )
+    acc = ThirdBodyEnv().acceleration(con, env)["ESA"]
+    sc = con.spacecraft["ESA"]
+    *_, r_bodies = env.get_ephem(sc.sspice_et, sc.sspice_gps, sc.sc_utc)
+    return SimpleNamespace(con=con, sc=sc, env=env, acc=acc, r_bodies=r_bodies)
 
 
-def _assert_epochs_align(sc, orekit_ref_small):
-    """The Orekit rows are labelled in GPS time; ``sc_utc`` is UTC (tz-aware)."""
-    utc = pd.DatetimeIndex(sc.sc_utc).tz_convert(None)
+def _gps_labels(sc) -> pd.DatetimeIndex:
+    """GPS-scale labels of the samples, derived from ``sc.sspice_gps``."""
+    return (J2000_GPS_LABEL + pd.to_timedelta(sc.sspice_gps, unit="s")).round("ms")
+
+
+def _assert_epochs_align(sc, esa_pod_small, orekit_ref_small):
+    """The POD file and the Orekit rows are both labelled in GPS time."""
     gps = pd.DatetimeIndex(orekit_ref_small["DateTime"])
-    assert len(utc) == len(gps)
-    assert (utc + GPS_MINUS_UTC_2018 == gps).all()
+    assert len(gps) == sc.N
+    assert (pd.DatetimeIndex(esa_pod_small["DateTime"]) == gps).all()
+    assert (_gps_labels(sc) == gps).all()
 
 
 # ---------------------------------------------------------------------------
@@ -139,20 +169,51 @@ def test_tba_pairwise_numba_satellite_at_origin_is_zero():
 # ---------------------------------------------------------------------------
 # FO-02 ThirdBodyEnv with a fake provider
 # ---------------------------------------------------------------------------
-def test_third_body_env_with_fake_provider(constellation_fixture, fake_provider):
-    """FO-02: one ``(B, N, 3)`` array per constellation member.
+#: (id, t0, n, alt, inc): different start epochs and lengths per member, with
+#: SAT-B interleaved 5 s after SAT-A, so slicing or cache mix-ups show up
+FO02_MEMBERS = [
+    ("SAT-A", "2018-01-02 00:00:00", 150, 400e3, 51.6),
+    ("SAT-B", "2018-01-02 00:00:05", 220, 500e3, 87.0),
+    ("SAT-C", "2018-01-02 00:20:00", 90, 300e3, 97.5),
+]
 
-    Also checks the result equals the kernel applied to the provider's
-    positions, so the per-member time slicing is right.
+
+@pytest.fixture
+def staggered_constellation() -> Constellation:
+    members = []
+    for sc_id, t0, n, alt, inc in FO02_MEMBERS:
+        state, time = make_circular_orbit(alt=alt, inc_deg=inc, n=n, t0=t0)
+        members.append(
+            Spacecraft(
+                state=state,
+                time=time,
+                sc_id_input=np.full(n, sc_id),
+                tscale_input="GPS",
+                **ESA_PROPS,
+            )
+        )
+    return Constellation(spacecraft=members)
+
+
+def test_third_body_env_with_fake_provider(staggered_constellation, fake_provider):
+    """FO-02: one ``(B, N_i, 3)`` array per member, each at its own epochs.
+
+    Members have different start epochs and sample counts. Each result must
+    equal the kernel applied to that member's own state and to body positions
+    at that member's own ET (from an independent ``FakeProvider``), so taking
+    another member's rows or cached epochs would fail.
     """
     env = SolarSystemEnvironment(BODIES, tolerance=0.01, provider=fake_provider)
-    acc = ThirdBodyEnv().acceleration(constellation_fixture, env)
+    acc = ThirdBodyEnv().acceleration(staggered_constellation, env)
 
-    assert set(acc) == set(constellation_fixture.spacecraft)
-    for sc_id, sc in constellation_fixture.spacecraft.items():
-        assert acc[sc_id].shape == (2, sc.N, 3)
-        assert np.isfinite(acc[sc_id]).all()
-        r_bodies = fake_provider(BODIES, ephem_time=sc.sspice_et)
+    assert set(acc) == {m[0] for m in FO02_MEMBERS}
+    reference = FakeProvider()
+    for sc_id, t0, n, _, _ in FO02_MEMBERS:
+        sc = staggered_constellation.spacecraft[sc_id]
+        assert sc.N == n
+        assert _gps_labels(sc)[0] == pd.Timestamp(t0)
+        assert acc[sc_id].shape == (2, n, 3)
+        r_bodies = reference(BODIES, ephem_time=sc.sspice_et)
         want = tba_pairwise_numba(sc.state_ecef[:, :3], r_bodies, env.GM)
         np.testing.assert_allclose(acc[sc_id], want, rtol=1e-14)
 
@@ -160,7 +221,7 @@ def test_third_body_env_with_fake_provider(constellation_fixture, fake_provider)
 # ---------------------------------------------------------------------------
 # FO-03 real SPICE magnitudes
 # ---------------------------------------------------------------------------
-def test_third_body_env_spice_magnitudes(esa_constellation, spice_env):
+def test_third_body_env_spice_magnitudes(esa_spice):
     """FO-03: Sun and Moon tidal accelerations at LEO are 1e-7 to 2e-6 m/s^2.
 
     Derivation: ``|a| = mu r / d^3 sqrt(1 + 3 cos^2 theta)`` to first order.
@@ -169,19 +230,17 @@ def test_third_body_env_spice_magnitudes(esa_constellation, spice_env):
     Moon (mu 4.903e12, d 3.6e8 to 4.06e8 m): 5.0e-7 to 1.45e-6 m/s^2.
     Each sample is also checked against its own first-order bounds
     ``[1, 2] * mu r / d^3`` with 3 % slack for the O(r/d) terms (r/d ~ 2 %
-    for the Moon).
+    for the Moon). Measured: Sun 2.87e-7 to 3.38e-7, Moon 7.44e-7 to 8.47e-7.
     """
-    sc = esa_constellation.spacecraft["ESA"]
-    acc = ThirdBodyEnv().acceleration(esa_constellation, spice_env)["ESA"]
-    *_, r_bodies = spice_env.get_ephem(sc.sspice_et, sc.sspice_gps, sc.sc_utc)
+    sc, acc = esa_spice.sc, esa_spice.acc
 
     mag = np.linalg.norm(acc, axis=2)
     assert acc.shape == (2, sc.N, 3)
     assert (mag > 1e-7).all() and (mag < 2e-6).all()
 
     r = np.linalg.norm(sc.state_ecef[:, :3], axis=1)
-    d = np.linalg.norm(r_bodies, axis=2)
-    scale = spice_env.GM[:, None] * r[None, :] / d**3
+    d = np.linalg.norm(esa_spice.r_bodies, axis=2)
+    scale = esa_spice.env.GM[:, None] * r[None, :] / d**3
     assert (mag > 0.97 * scale).all()
     assert (mag < 2.0 * 1.03 * scale).all()
 
@@ -202,7 +261,7 @@ def test_third_body_env_spice_magnitudes(esa_constellation, spice_env):
     ids=["SUN", "MOON"],
 )
 def test_third_body_env_matches_orekit(
-    esa_constellation, orekit_ref_small, spice_env, ibody, col, rel_tol
+    esa_spice, esa_pod_small, orekit_ref_small, ibody, col, rel_tol
 ):
     """FO-14: SPICE ``ThirdBodyEnv`` vs the stored Orekit accelerations.
 
@@ -213,55 +272,52 @@ def test_third_body_env_matches_orekit(
     differ by a ~3e-8 rad rotation (Sun positions ~4.5 km apart, distances
     equal to mm), which moves the tidal vector by a few times 3e-8 relative.
     """
-    sc = esa_constellation.spacecraft["ESA"]
-    _assert_epochs_align(sc, orekit_ref_small)
+    _assert_epochs_align(esa_spice.sc, esa_pod_small, orekit_ref_small)
 
-    acc = ThirdBodyEnv().acceleration(esa_constellation, spice_env)["ESA"][ibody]
+    acc = esa_spice.acc[ibody]
     ref = orekit_ref_small[[f"ecef_{col}_a{c}" for c in "xyz"]].to_numpy()
 
     rel = np.linalg.norm(acc - ref, axis=1) / np.linalg.norm(ref, axis=1)
     assert rel.max() < rel_tol, f"max relative difference {rel.max():.3g}"
 
 
-def test_third_body_env_row0_snapshot(esa_constellation, spice_env):
+def test_third_body_env_row0_snapshot(esa_spice):
     """FO-14: row 0 equals the notebook snapshot (9 significant digits).
 
     The snapshot was printed with 9 significant digits, so each component
     carries a rounding error of at most 5e-9 relative; rtol 1e-8 is used.
     """
-    acc = ThirdBodyEnv().acceleration(esa_constellation, spice_env)["ESA"]
     for i, body in enumerate(BODIES):
-        np.testing.assert_allclose(acc[i, 0], SNAPSHOT_ROW0[body], rtol=1e-8, atol=0)
+        np.testing.assert_allclose(
+            esa_spice.acc[i, 0], SNAPSHOT_ROW0[body], rtol=1e-8, atol=0
+        )
 
 
 # ---------------------------------------------------------------------------
 # FO-12 legacy ThirdBodyAcc
 # ---------------------------------------------------------------------------
-def _legacy(sc, stime=None):
-    if stime is None:
-        # GPS labels, tz-naive (DatetimeIndex: see the Series xfail below)
-        stime = pd.DatetimeIndex(sc.sc_utc).tz_convert(None) + GPS_MINUS_UTC_2018
+def _legacy(sc, stime):
     return ThirdBodyAcc(
         spos=sc.state_ecef[:, :3], stime=stime, body=BODIES, scale="GPS"
     )
 
 
-def test_third_body_acc_legacy_equals_env(esa_constellation, spice_env):
-    """FO-12: legacy ``ThirdBodyAcc`` equals ``ThirdBodyEnv`` bit for bit.
+def test_third_body_acc_legacy_equals_env(esa_spice, esa_pod_small):
+    """FO-12: legacy ``ThirdBodyAcc`` equals ``ThirdBodyEnv``.
 
-    Both evaluate ``spkpos`` at the same ET (the legacy class converts GPS to
-    ET with ``unitim``; ``Spacecraft`` does the same) and call the same
-    kernel, so no tolerance is needed (as in the notebook). The environment's
-    0.01 s binning does not alter positions here because the 10 s samples
-    fall in distinct bins.
+    Both evaluate ``spkpos`` at the same ET (the legacy class converts the
+    GPS labels to ET with ``unitim``; ``Spacecraft`` does the same) and call
+    the same kernel. The result was bit-identical locally (as in the
+    notebook); rtol 1e-13 leaves room for ``fastmath`` and ET-path rounding
+    across the CI matrix. The environment's 0.01 s binning does not alter
+    positions because the 10 s samples fall in distinct bins.
     """
-    sc = esa_constellation.spacecraft["ESA"]
-    env_acc = ThirdBodyEnv().acceleration(esa_constellation, spice_env)["ESA"]
-
-    leg = _legacy(sc)
+    sc = esa_spice.sc
+    # GPS labels as a tz-naive DatetimeIndex (a Series fails: see below)
+    leg = _legacy(sc, pd.DatetimeIndex(esa_pod_small["DateTime"]))
     leg.calc_tba()
 
-    np.testing.assert_array_equal(leg.get_tba(), env_acc)
+    np.testing.assert_allclose(leg.get_tba(), esa_spice.acc, rtol=1e-13, atol=0)
     assert leg.get_body_pos().shape == (2, sc.N, 3)
 
 
@@ -270,11 +326,10 @@ def test_third_body_acc_legacy_equals_env(esa_constellation, spice_env):
     raises=pytest.fail.Exception,
     reason="R9: ThirdBodyAcc not yet deprecated",
 )
-def test_third_body_acc_warns_deprecation(esa_constellation):
+def test_third_body_acc_warns_deprecation(esa_spice, esa_pod_small):
     """FO-12: after R9, using ``ThirdBodyAcc`` emits ``DeprecationWarning``."""
-    sc = esa_constellation.spacecraft["ESA"]
     with pytest.warns(DeprecationWarning):
-        leg = _legacy(sc)
+        leg = _legacy(esa_spice.sc, pd.DatetimeIndex(esa_pod_small["DateTime"]))
         leg.calc_tba()
 
 
@@ -286,17 +341,14 @@ def test_third_body_acc_warns_deprecation(esa_constellation):
         "lacks; fails for a Series stime, including the default"
     ),
 )
-def test_third_body_acc_accepts_series_stime(esa_constellation, spice_env):
+def test_third_body_acc_accepts_series_stime(esa_spice, esa_pod_small):
     """FO-12: ``stime`` given as a ``pd.Series`` (the documented default type).
 
     ``pd.to_datetime(Series)`` returns a Series, which has ``.dt.tz`` but no
     ``.tzinfo``.
     """
-    sc = esa_constellation.spacecraft["ESA"]
-    stime = pd.Series(pd.DatetimeIndex(sc.sc_utc).tz_convert(None) + GPS_MINUS_UTC_2018)
-    leg = _legacy(sc, stime=stime)
+    leg = _legacy(esa_spice.sc, esa_pod_small["DateTime"])
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         leg.calc_tba()
-    env_acc = ThirdBodyEnv().acceleration(esa_constellation, spice_env)["ESA"]
-    np.testing.assert_array_equal(leg.get_tba(), env_acc)
+    np.testing.assert_allclose(leg.get_tba(), esa_spice.acc, rtol=1e-13, atol=0)

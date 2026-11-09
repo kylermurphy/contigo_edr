@@ -24,15 +24,26 @@ from contigo.forces.grav_pot import EarthPotential
 from contigo.forces.third_body_acc import ThirdBodyEnv
 
 MODELS = [ThirdBodyEnv, EarthPotential]
+DOUBLES = [FakeForce, FakePotential]
 
 
 @pytest.mark.parametrize("cls", MODELS, ids=lambda c: c.__name__)
-def test_models_have_protocol_members(cls):
-    """FO-09: each model has a ``name`` string and callable methods."""
-    model = cls()
-    assert isinstance(model.name, str) and model.name
-    assert callable(model.acceleration)
-    assert callable(model.potential)
+def test_models_have_nonempty_name(cls):
+    """FO-09: each model has a non-empty ``str`` name."""
+    name = cls().name
+    assert isinstance(name, str) and name.strip()
+
+
+def test_third_body_env_potential_not_implemented(constellation_fixture):
+    """FO-09: ``ThirdBodyEnv`` is acceleration-only; ``potential`` raises."""
+    with pytest.raises(NotImplementedError):
+        ThirdBodyEnv().potential(constellation_fixture)
+
+
+def test_earth_potential_acceleration_not_implemented(constellation_fixture):
+    """FO-09: ``EarthPotential`` is potential-only; ``acceleration`` raises."""
+    with pytest.raises(NotImplementedError):
+        EarthPotential().acceleration(constellation_fixture, None)
 
 
 @pytest.mark.parametrize("cls", MODELS, ids=lambda c: c.__name__)
@@ -52,7 +63,16 @@ def test_models_define_declared_is_conservative(cls):
     assert isinstance(cls().is_conservative, bool)
 
 
-@pytest.mark.parametrize("cls", [FakeForce, FakePotential], ids=lambda c: c.__name__)
+@pytest.mark.parametrize("cls", DOUBLES, ids=lambda c: c.__name__)
+def test_doubles_implement_protocol_methods(cls):
+    """FO-09: precondition for the structural check below: the doubles have
+    a ``name`` and callable ``acceleration`` and ``potential``."""
+    model = cls()
+    assert isinstance(model.name, str) and model.name
+    assert callable(model.acceleration) and callable(model.potential)
+
+
+@pytest.mark.parametrize("cls", DOUBLES, ids=lambda c: c.__name__)
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
@@ -61,6 +81,4 @@ def test_models_define_declared_is_conservative(cls):
 def test_structural_models_are_force_models(cls):
     """FO-09: a model with ``name``/``acceleration``/``potential`` but no
     ``ForceModel`` base class satisfies the runtime-checkable Protocol."""
-    model = cls()
-    assert callable(model.acceleration) and callable(model.potential)
-    assert isinstance(model, ForceModel)
+    assert isinstance(cls(), ForceModel)
