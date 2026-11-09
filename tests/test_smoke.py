@@ -1,4 +1,8 @@
-"""Smoke tests: the package and its subpackages import, and bundled data ships.
+"""Smoke tests: the package and its subpackages import, and bundled data exists.
+
+These run against whatever ``contigo`` is importable (usually the editable
+source tree), so they do not prove the *wheel* is complete. The CI ``install``
+job (task 0.5a, PK-02) builds and installs a non-editable wheel for that.
 
 added: 09/11/2026 Claude Code
 """
@@ -27,7 +31,6 @@ def test_import_contigo():
 
 @pytest.mark.parametrize("name", SUBPACKAGES)
 def test_subpackages_import(name):
-    # a non-editable install with packages=["contigo"] used to drop these
     assert importlib.import_module(name).__name__ == name
 
 

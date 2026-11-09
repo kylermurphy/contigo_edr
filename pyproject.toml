@@ -79,7 +79,6 @@ include = ["contigo*"]
 
 [tool.setuptools.package-data]
 contigo = [
-    "py.typed",
     "data/*.tls",
     "data/*.bpc",
     "data/*.bsp",

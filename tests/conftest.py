@@ -38,5 +38,6 @@ def pytest_collection_modifyitems(
             continue
         skip = pytest.mark.skip(reason=f"{tier} test: use --run-{tier} to run")
         for item in items:
-            if tier in item.keywords:
+            # check real markers only; item.keywords also holds node names
+            if item.get_closest_marker(tier) is not None:
                 item.add_marker(skip)
