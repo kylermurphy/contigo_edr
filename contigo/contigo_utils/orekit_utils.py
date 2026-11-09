@@ -8,6 +8,7 @@ import orekit_jpype as orekit
 import requests
 
 import contigo.config as config
+import contigo.contigo_utils.utils as utils
 
 
 def start_orekit(
@@ -75,6 +76,8 @@ def get_gitlab_sha(project_id=18, branch="main"):
     # Note: the branch was renamed from 'master' to 'main'
     url_base = "https://gitlab.orekit.org/api/v4/projects/"
     url = f"{url_base}{project_id}/repository/commits/{branch}"
+    # offline: fail fast (local-zip fallback comes with R5)
+    utils._require_online(url)
     response = requests.get(url)
 
     if response.status_code == 404:

@@ -28,7 +28,7 @@
 | P10 | **[DECISION]** GMAT is **likely to be removed** (hard to work with). No GMAT tests are written in Phase 0; the GMAT ones are listed as ToDo (§4.8) and the removal is refactor R15. |
 | P11 | **[DECISION]** CI matrix: Python 3.10, 3.12, 3.13, 3.14. |
 | P12 | **[DECISION]** Each subagent runs on an explicitly chosen model matched to the task (§6.1). |
-| P13 | **[DECISION]** Downloaded files go to the `platformdirs` **user cache dir** (override with `CONTIGO_CACHE_DIR`); `contigo/data` stays bundled, read-only package data. `CONTIGO_OFFLINE=1` forbids every download (`config.OfflineError`). |
+| P13 | **[DECISION]** Downloaded files go to the `platformdirs` **user cache dir** (override with `CONTIGO_CACHE_DIR`); `contigo/data` stays bundled, read-only package data. `CONTIGO_OFFLINE=1` blocks `dl_file` (`config.OfflineError`), `wf_mtime` and the Orekit GitLab SHA query; until R5 an offline Orekit start raises `OfflineError` instead of using a local zip. |
 
 ---
 
@@ -324,7 +324,7 @@ Each refactor lands **after** the tests that cover it, in its own PR, and remove
 | R1 | Unstage the big `.gfc` files (Kyle) | **Now** | pushing |
 | R2 | ICGEM download on demand: a small registry `{name: url}` in `grav_utils`; `GravPot` downloads into `DATA_DIR` when the file is missing; delete the duplicate `data/EIGEN-2.gfc` | High | P1 |
 | R3 | `srp_orekit.py` **and `jb08_utils.py` (F24)**: move the JVM start and Java imports into the class/function that needs them (same pattern as `OrekitEphem`) | High | PK-01, CI |
-| R4 | `config.py`: drop `logging.basicConfig`; replace `print` with `logger` | **Done** (PR `feat/r11-offline-cache`: `basicConfig` removed, `NullHandler` on the `contigo` logger; `print` to `logger` still open) | |
+| R4 | `config.py`: drop `logging.basicConfig`; replace `print` with `logger` | **Done** (PR `feat/r11-offline-cache`: `basicConfig` removed and no handler added, so warnings still reach stderr via `lastResort`; `print` to `logger` still open) | |
 | R5 | `orekit_utils`: jar via `importlib.resources`; if GitLab is unreachable, use the newest local `orekit_data_*.zip`; raise instead of returning an error string on 404; untrack `contigo/data/orekit_data_*.zip` (add to `.gitignore`) | High | non-editable install, offline use |
 | R6 | `ForceModel.is_conservative`: **[PROPOSED]** remove it from the Protocol (nothing reads it); fixes both parts of F6 | Medium | FO-09 |
 | R7 | `GravPot`: raise in `get_pot` when nothing is computed; clamp `lmax` on the cached path; key the cache on the full path | **High** (out-of-bounds read in Numba, F7) | FO-07 |
@@ -333,7 +333,7 @@ Each refactor lands **after** the tests that cover it, in its own PR, and remove
 | R10 | `time_utils`: upper-case `out_scale`; UTC→UTC path and message typo (F25); numpy docstrings; vectorisation optional | Low | TU-03 |
 | R17 | `Spacecraft`: copy input arrays before unit conversion (F19); make `load_from_arrays`/`load_from_file` run the same normalisation as `__post_init__` (time axes, units) (F20) | High (silent wrong numbers) | SC-02, SC-12 xfails |
 | R18 | `SolarSystemEnvironment`: request each missing bin once (F21). `EDRDensity`: key accelerations by position or reject duplicate model names (F22) | Medium | EP-04, ED xfail |
-| R11 | `CONTIGO_OFFLINE=1` env switch read in `config`: skips the NAIF mtime check and the GitLab SHA query, using local files | **Done** (PR `feat/r11-offline-cache`: `config.is_offline()`, `OfflineError` from `dl_file`, no `wf_mtime`/NAIF check offline; the GitLab SHA query is handled with R5) | CI determinism, Colab cold start |
+| R11 | `CONTIGO_OFFLINE=1` env switch read in `config`: skips the NAIF mtime check and the GitLab SHA query, using local files | **Done** (PR `feat/r11-offline-cache`: `config.is_offline()`, `OfflineError` from `dl_file` and `get_gitlab_sha`, no `wf_mtime`/NAIF check offline; until R5 an offline Orekit start raises `OfflineError`, and R5 adds the local-zip fallback) | CI determinism, Colab cold start |
 | R12 | Fix the `forces/__init__.py` docstring; add `contigo.__version__` | Low | |
 | R13 | Mechanical `ruff --fix` + `black` over `contigo/`, then empty the ruff exclude list | Medium (separate PR, no logic changes) | strict lint |
 | R16 | Writable data goes to a per-user cache dir (`platformdirs`), with bundled read-only files still read from the package; drop or replace the `git+https` `orekit` extra (F16, F17) | Medium, after R2/R5 (same code paths). **R16a done** (PR `feat/r11-offline-cache`): `config.cache_dir()`, `config.find_data_file()`, `platformdirs` dependency, `orekit` extra removed (P13). **R16b open**: move SPICE/ICGEM/Orekit downloads into the cache | PyPI release, read-only installs |

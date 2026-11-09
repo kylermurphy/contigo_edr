@@ -98,9 +98,9 @@ Check `config.state['orekit_loaded']` before using any Orekit feature. `OrekitEp
 
 ## Data and Network
 
-- `config.DATA_DIR` / `data_path()` is bundled, read-only package data. `config.cache_dir(sub)` is the per-user writable cache (`platformdirs` user cache dir, override with `CONTIGO_CACHE_DIR`); `config.find_data_file(name, sub)` looks up explicit path > cache > bundled.
-- `CONTIGO_OFFLINE=1` forbids downloads: `utils.dl_file` raises `config.OfflineError`, `wf_mtime` returns `None`, and the NAIF kernel freshness check is skipped. CI sets it; tests use a temporary `CONTIGO_CACHE_DIR`.
-- contigo never configures the root logger (only a `NullHandler` on `"contigo"`); call `logging.basicConfig(level=logging.INFO)` in your script to see its messages.
+- `config.DATA_DIR` / `data_path()` is bundled, read-only package data. `config.cache_dir(sub)` is the per-user writable cache (`platformdirs` user cache dir, override with `CONTIGO_CACHE_DIR`); `config.find_data_file(name, sub)` resolves a path with a directory part as given (None if missing) and looks up a bare filename in the current dir, then the cache, then the bundled data; it creates nothing.
+- `CONTIGO_OFFLINE=1` covers `utils.dl_file` (raises `config.OfflineError`), `utils.wf_mtime` (returns `None`, so the NAIF kernel freshness check is skipped) and the Orekit GitLab SHA query. Until R5, starting Orekit offline raises `OfflineError` instead of using a local data zip. CI sets it; tests use a temporary `CONTIGO_CACHE_DIR`.
+- contigo never configures logging (no `basicConfig`, no handlers): warnings still reach stderr via Python's last-resort handler; call `logging.basicConfig(level=logging.INFO)` in your script to see INFO messages.
 
 ## Key Conventions
 
