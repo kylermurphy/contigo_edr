@@ -73,6 +73,23 @@ def _circular(
     return Constellation(spacecraft=sc)
 
 
+def _circular_with_gap(drop_s: tuple[float, float], n: int = N) -> Constellation:
+    """``_circular(inc_deg=0)`` with the samples at elapsed seconds in the
+    closed interval ``drop_s`` removed (a data gap)."""
+    state, time = make_circular_orbit(inc_deg=0.0, n=n, dt=DT)
+    elapsed = np.arange(n) * DT
+    keep = (elapsed < drop_s[0]) | (elapsed > drop_s[1])
+    m = int(keep.sum())
+    sc = Spacecraft(
+        state=state[keep],
+        time=time[keep],
+        sc_id_input=np.full(m, "X"),
+        tscale_input="GPS",
+        **ESA_PROPS,
+    )
+    return Constellation(spacecraft=sc)
+
+
 def _fake_env(provider: FakeProvider | None = None) -> SolarSystemEnvironment:
     return SolarSystemEnvironment(
         ["SUN", "MOON"], tolerance=0.01, provider=provider or FakeProvider()
@@ -260,9 +277,11 @@ def test_den_windows_midpoints_and_value(n, n_windows):
     Window loop: ``s = t0 + j W``, ``e = s + W`` while ``e <= t_last``, so the
     count is ``floor(T / W)`` with ``T = t_last - t0``. With W = 900 s and
     dt = 10 s, ``i0 = searchsorted(s, 'left') = 90 j`` and
-    ``i1 = searchsorted(e, 'left') - 1 = 90 j + 89`` (the sample at ``e``
-    itself is excluded, so each window spans W - dt = 890 s). The DateTime is
-    the midpoint ``t[i0] + (t[i1] - t[i0]) / 2 = t0 + 900 j + 445 s``.
+    ``i1 = searchsorted(e, 'right') - 1 = 90 j + 90`` (the sample at ``e`` is
+    included, so each window spans the full W = 900 s and consecutive windows
+    share their boundary sample, F26). The DateTime is the midpoint
+    ``t[i0] + (t[i1] - t[i0]) / 2 = t0 + 900 j + 450 s``. For n = 541 the last
+    window ends exactly on the last sample (``i1 = 540``).
 
     With ED-02/ED-04 inputs, dEDR = k |v|^2 dt and d(denom) = b |v|^3 dt over
     the same interval, so ``efd = -2 k / (b |v|)`` in every window,
@@ -286,15 +305,80 @@ def test_den_windows_midpoints_and_value(n, n_windows):
     assert len(df) == n_windows == int(span // window.total_seconds())
 
     j = np.arange(n_windows)
-    i0, i1 = 90 * j, 90 * j + 89
+    i0, i1 = 90 * j, 90 * j + 90
+    assert i1[-1] <= n - 1
+    assert ((t[i1] - t[i0]).total_seconds() == window.total_seconds()).all()
     mid = t[i0] + (t[i1] - t[i0]) / 2
     assert (pd.DatetimeIndex(df["DateTime"]) == mid).all()
-    assert (mid == t[0] + pd.to_timedelta(900 * j + 445, unit="s")).all()
+    assert (mid == t[0] + pd.to_timedelta(900 * j + 450, unit="s")).all()
 
     expected = -2 * k / (B_ESA * v)
     np.testing.assert_allclose(df["efd"].to_numpy(), expected, rtol=1e-9)
     # the intermediate results are stored on the instance
     assert set(calc.edr) == set(calc.denom) == {"X"}
+
+
+def test_den_gap_at_window_end_uses_last_sample_before():
+    """ED-05: a gap at a window end uses the last sample before the gap.
+
+    The sample at elapsed 900 s (index 90) is removed. Window 0 is
+    [0, 900] s: ``i1 = searchsorted(900, 'right') - 1`` is the sample at 890 s,
+    so it spans 890 s, midpoint 445 s. Window 1 is [900, 1800] s: ``i0`` is
+    the first sample at or after 900 s, i.e. 910 s, and ``i1`` the sample at
+    1800 s, so it spans 890 s, midpoint 1355 s. Later windows are complete
+    (span 900 s, midpoint 900 j + 450 s). The window count is unchanged,
+    ``floor(5990 / 900) = 6``. ``efd = -2k / (b |v|)`` still holds in every
+    window: both integrands are constant, so Simpson's rule on the
+    non-uniform grid is exact up to round-off (rtol 1e-9 as above).
+    """
+    k = 1e-6
+    con = _circular_with_gap((900.0, 900.0))
+    t = pd.DatetimeIndex(con["X"].sc_utc)
+    assert len(t) == N - 1
+    v = _speed(con)[0]
+    calc = EDRDensity(con, _fake_env(), [FakeForce(k, "Drag")], FakePotential())
+    df = calc.compute_den(window=pd.Timedelta(seconds=900), smth_edr=1)["X"]
+    assert len(df) == 6
+    mid_s = np.array([445.0, 1355.0, 2250.0, 3150.0, 4050.0, 4950.0])
+    expected_t = t[0] + pd.to_timedelta(mid_s, unit="s")
+    assert (pd.DatetimeIndex(df["DateTime"]) == expected_t).all()
+    np.testing.assert_allclose(df["efd"], -2 * k / (B_ESA * v), rtol=1e-9)
+
+
+@pytest.mark.parametrize(
+    "drop_s, n_samples_in_window1",
+    [
+        ((900.0, 1790.0), 1),  # only the sample at 1800 s remains: i0 == i1
+        ((900.0, 1800.0), 0),  # no sample in [900, 1800]: i1 == i0 - 1
+    ],
+)
+def test_den_degenerate_window_is_skipped(drop_s, n_samples_in_window1):
+    """ED-05: a window with fewer than two samples (``i1 <= i0``) is skipped.
+
+    The samples in ``drop_s`` (elapsed seconds) are removed, so window 1,
+    [900, 1800] s, holds one sample (``i0 == i1``, 0/0) or none
+    (``i1 = i0 - 1``). It produces no row; the other 5 of the
+    ``floor(5990 / 900) = 6`` windows remain. Window 0 is [0, 890] s
+    (midpoint 445 s). Window 2 starts at the first sample at or after
+    1800 s (1800 s or 1810 s) and ends at 2700 s. Windows 3-5 are complete
+    (midpoint 900 j + 450 s). No NaN, and ``efd = -2k / (b |v|)``.
+    """
+    k = 1e-6
+    con = _circular_with_gap(drop_s)
+    t = pd.DatetimeIndex(con["X"].sc_utc)
+    elapsed = (t - t[0]).total_seconds().to_numpy()
+    in_w1 = (elapsed >= 900.0) & (elapsed <= 1800.0)
+    assert in_w1.sum() == n_samples_in_window1
+    v = _speed(con)[0]
+    calc = EDRDensity(con, _fake_env(), [FakeForce(k, "Drag")], FakePotential())
+    df = calc.compute_den(window=pd.Timedelta(seconds=900), smth_edr=1)["X"]
+    assert len(df) == 5
+    w2_start = elapsed[elapsed >= 1800.0][0]
+    mid_s = np.array([445.0, (w2_start + 2700.0) / 2, 3150.0, 4050.0, 4950.0])
+    expected_t = t[0] + pd.to_timedelta(mid_s, unit="s")
+    assert (pd.DatetimeIndex(df["DateTime"]) == expected_t).all()
+    assert np.isfinite(df["efd"]).all()
+    np.testing.assert_allclose(df["efd"], -2 * k / (B_ESA * v), rtol=1e-9)
 
 
 def test_den_mismatched_keys_raise():
