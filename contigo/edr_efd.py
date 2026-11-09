@@ -82,7 +82,19 @@ class EDRDensity:
         ----------
         window : pd.Timedelta, optional
             The size of the window used for deriving the deltas of the EDR and
-            denominator, by default pd.Timedelta(minutes=90)
+            denominator, by default pd.Timedelta(minutes=90). Window ``j`` covers
+            the closed interval ``[s_j, e_j]`` with ``s_j = t0 + j * window`` and
+            ``e_j = s_j + window`` (``t0`` is the first sample); windows are
+            generated while ``e_j <= t_last``, so a trailing partial window is
+            dropped. The deltas are taken between ``i0``, the first sample at or
+            after ``s_j``, and ``i1``, the last sample at or before ``e_j``. On a
+            regular grid this is the sample at ``e_j`` itself, so the deltas span
+            the full window and consecutive windows share their boundary sample.
+            If the data have a gap at ``e_j``, the last sample before the gap is
+            used (and, for a gap at ``s_j``, the first sample after it), so the
+            window spans less than ``window``. A window with fewer than two
+            samples (``i1 <= i0``) has no interval to difference over and is
+            skipped: it produces no row in the output.
         smth_edr : int, optional
             The number of points to smooth edr returned by compute_edr(), by default 10
         smth_den : int | None, optional
@@ -93,8 +105,8 @@ class EDRDensity:
         dict
             A dictionary keyed by spacecraft ID with the effective density time series.
             The timeseries is a pandas DataFrame with columns 'DateTime' and 'efd' for
-            the effective density. The 'DateTime' column is the center of the time
-            window used for deriving the effective density.
+            the effective density. The 'DateTime' column is the midpoint
+            ``t[i0] + (t[i1] - t[i0]) / 2`` of the samples used for each window.
 
         Raises
         ------
@@ -145,15 +157,18 @@ class EDRDensity:
             e = s + window
 
             while e <= sc_utc[-1]:
+                # first sample at or after s, last sample at or before e
                 i0 = np.searchsorted(sc_utc, s, side="left")
-                i1 = np.searchsorted(sc_utc, e, side="left") - 1
-                id0_list.append(i0)
-                id1_list.append(i1)
+                i1 = np.searchsorted(sc_utc, e, side="right") - 1
+                # skip windows with fewer than two samples (no interval)
+                if i1 > i0:
+                    id0_list.append(i0)
+                    id1_list.append(i1)
                 s += window
                 e += window
 
-            id0 = np.array(id0_list)
-            id1 = np.array(id1_list)
+            id0 = np.array(id0_list, dtype=int)
+            id1 = np.array(id1_list, dtype=int)
 
             delta_edr = edr_sm[id1] - edr_sm[id0]
             delta_den = denom[id1] - denom[id0]
