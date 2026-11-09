@@ -54,6 +54,8 @@ cd java_src && mvn clean package
 
 `orekit_utils.helper_jar_path()` finds the jar through `importlib.resources` and `start_orekit()` puts it on the JVM classpath. For one release a jar in the old location `java_src/target/` is still accepted with a `FutureWarning`.
 
+Orekit data: `orekit_utils.resolve_orekit_data()` (called by `start_orekit()` **before** the JVM starts, no JVM needed) picks `orekit_data_<sha8>.zip` in `config.cache_dir("orekit")`. Online it queries the latest orekit-data commit on gitlab.orekit.org; a zip for that SHA in the cache or the legacy `config.DATA_DIR` is reused, otherwise it is downloaded (timeouts; per-process `.part` file, checked as a complete zip, then `os.replace`; older cache zips are deleted only after that). Offline, or when the query, download or check fails (warning), it uses the newest cache zip by mtime, and the legacy `DATA_DIR` zip only if the cache has none (git refreshes that file's mtime); with none it raises `OrekitDataNotFoundError` (a `FileNotFoundError`). It never writes into `contigo/data`. If the JVM was started outside contigo, `start_orekit()` logs a warning and returns (a classpath cannot change after start).
+
 ## Architecture
 
 The framework has four layers that compose top-to-bottom:
@@ -99,8 +101,7 @@ Check `config.state['orekit_loaded']` before using any Orekit feature. `OrekitEp
 ## Data and Network
 
 - `config.DATA_DIR` / `data_path()` is bundled, read-only package data. `config.cache_dir(sub)` is the per-user writable cache (`platformdirs` user cache dir, override with `CONTIGO_CACHE_DIR`); `config.find_data_file(name, sub)` resolves a path with a directory part as given (None if missing) and looks up a bare filename in the current dir, then the cache, then the bundled data; it creates nothing.
-- `CONTIGO_OFFLINE=1` covers `utils.dl_file` (raises `config.OfflineError`), `utils.wf_mtime` (returns `None`, so the NAIF kernel freshness check is skipped) and the Orekit GitLab SHA query. CI sets it; tests use a temporary `CONTIGO_CACHE_DIR`.
-- Orekit data: `orekit_utils.resolve_orekit_data()` (called by `start_orekit()` **before** the JVM starts, no JVM needed) picks `orekit_data_<sha8>.zip` in `config.cache_dir("orekit")`. Online it queries the latest orekit-data commit on gitlab.orekit.org; a zip for that SHA in the cache or the legacy `config.DATA_DIR` is reused, otherwise it is downloaded (timeouts; per-process `.part` file, checked as a complete zip, then `os.replace`; older cache zips are deleted only after that). Offline, or when the query, download or check fails (warning), it uses the newest cache zip by mtime, and the legacy `DATA_DIR` zip only if the cache has none (git refreshes that file's mtime); with none it raises `OrekitDataNotFoundError` (a `FileNotFoundError`). It never writes into `contigo/data`. If the JVM was started outside contigo, `start_orekit()` logs a warning and returns (a classpath cannot change after start).
+- `CONTIGO_OFFLINE=1` covers `utils.dl_file` (raises `config.OfflineError`), `utils.wf_mtime` (returns `None`, so the NAIF kernel freshness check is skipped) and the Orekit GitLab SHA query. Until R5, starting Orekit offline raises `OfflineError` instead of using a local data zip. CI sets it; tests use a temporary `CONTIGO_CACHE_DIR`.
 - contigo never configures logging (no `basicConfig`, no handlers): warnings still reach stderr via Python's last-resort handler; call `logging.basicConfig(level=logging.INFO)` in your script to see INFO messages.
 
 ## Key Conventions
