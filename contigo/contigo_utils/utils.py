@@ -20,7 +20,15 @@ import requests
 from dateutil import tz
 from tqdm import tqdm
 
+import contigo.config as config
+
 logger = logging.getLogger(__name__)
+
+
+def _require_online(url):
+    """Raise ``config.OfflineError`` if ``CONTIGO_OFFLINE`` is set."""
+    if config.is_offline():
+        raise config.OfflineError(f"CONTIGO_OFFLINE is set; refusing to download {url}")
 
 
 def dl_file(url, filename):
@@ -38,8 +46,11 @@ def dl_file(url, filename):
         DESCRIPTION.
     RuntimeError
         DESCRIPTION.
+    contigo.config.OfflineError
+        If ``CONTIGO_OFFLINE`` is set (no request is made).
 
     """
+    _require_online(url)
     r = requests.get(url, stream=True, allow_redirects=True)
     if r.status_code != 200:
         r.raise_for_status()  # Will only raise for 4xx codes, so...
@@ -75,8 +86,11 @@ def wf_mtime(url):
 
     Returns:
         datetime or None: The last modified date as a datetime object,
-                          or None if the header is not found or an error occurs.
+                          or None if the header is not found, an error occurs,
+                          or ``CONTIGO_OFFLINE`` is set (no request is made).
     """
+    if config.is_offline():
+        return None
     try:
         response = requests.head(url)  # Use HEAD request for efficiency
         response.raise_for_status()  # Raise an exception for bad status codes

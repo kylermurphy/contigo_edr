@@ -130,7 +130,8 @@ class SPICEEphem(EphemerisProvider):
         Navigation and Ancillary Information Facility (NAIF).
 
         Will check if local files exist. Will download if files on the server are newer
-        then the local files.
+        then the local files. With ``CONTIGO_OFFLINE`` set the modification-time
+        check is skipped and a missing kernel raises ``config.OfflineError``.
 
         Parameters
         ----------
@@ -162,8 +163,11 @@ class SPICEEphem(EphemerisProvider):
             # create file names
             fp = path.join(config.DATA_DIR, file)
             if not path.exists(fp):
+                # raises config.OfflineError (naming the url) when offline
                 logger.info("Downloading kernel - %s", fp)
                 utils.dl_file(url, fp)
+            elif config.is_offline():
+                logger.info("CONTIGO_OFFLINE set; using local kernel %s", fp)
             else:
                 # check for modification times
                 loc_tz = datetime.now().astimezone().tzinfo

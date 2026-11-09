@@ -1,28 +1,84 @@
 """Config and State values for CONTIGO
 
+Data and network
+----------------
+- ``DATA_DIR`` / :func:`data_path`: bundled, read-only package data.
+- :func:`cache_dir`: per-user writable cache for downloaded files
+  (``$CONTIGO_CACHE_DIR`` if set, else the platformdirs user cache dir).
+- :func:`is_offline`: ``CONTIGO_OFFLINE=1`` forbids every download; helpers
+  raise :class:`OfflineError` instead of touching the network.
+
 added: 19/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
+from __future__ import annotations
+
 import logging
-from os import makedirs
+import os
 from pathlib import Path
 
-logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.INFO)
+import platformdirs
+
+# A library must not configure the root logger; applications decide (R4).
+logging.getLogger("contigo").addHandler(logging.NullHandler())
+
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
-def data_path():
-    # setup data dir
-    # find directory of module
-    # module directory/swdata/ is where the data is stored
-    f_path = Path(__file__).resolve()
-    d_dir = f_path / ".." / "data"
-    d_dir = d_dir.resolve()
+def is_offline() -> bool:
+    """True if ``CONTIGO_OFFLINE`` is set to 1/true/yes/on (any case).
 
-    # create it if it doesn't exist
-    if not d_dir.exists():
-        makedirs(d_dir)
+    The environment is read on every call, so it can be toggled at runtime.
+    """
+    return os.environ.get("CONTIGO_OFFLINE", "").strip().lower() in _TRUTHY
 
-    return str(d_dir)
+
+class OfflineError(RuntimeError):
+    """Raised when a download is needed but ``CONTIGO_OFFLINE`` is set."""
+
+
+def cache_dir(sub: str = "") -> Path:
+    """Per-user writable cache directory, created if missing.
+
+    Resolved on every call: ``$CONTIGO_CACHE_DIR`` if set, else
+    ``platformdirs.user_cache_dir("contigo")``. ``sub`` names a subdirectory
+    (e.g. ``"spice"``, ``"gravity"``, ``"orekit"``).
+    """
+    root = os.environ.get("CONTIGO_CACHE_DIR") or platformdirs.user_cache_dir(
+        "contigo", appauthor=False
+    )
+    d = Path(root).expanduser()
+    if sub:
+        d = d / sub
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def data_path() -> str:
+    """Directory of the bundled, read-only package data (never created)."""
+    try:
+        from importlib.resources import files
+
+        d = Path(str(files("contigo") / "data"))
+    except (ImportError, TypeError):
+        d = Path(__file__).parent / "data"
+    return str(d.resolve())
+
+
+def find_data_file(name: str | os.PathLike, sub: str = "") -> Path | None:
+    """Locate a data file; return its path, or None if it is not found.
+
+    Lookup order: (1) ``name`` as an existing path (absolute or relative),
+    (2) ``cache_dir(sub) / basename``, (3) ``DATA_DIR / basename``.
+    """
+    p = Path(name).expanduser()
+    if p.is_file():
+        return p
+    for d in (cache_dir(sub), Path(DATA_DIR)):
+        cand = d / p.name
+        if cand.is_file():
+            return cand
+    return None
 
 
 # Static configuration values (constants)

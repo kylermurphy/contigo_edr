@@ -83,7 +83,18 @@ def pytest_collection_modifyitems(
 # Environment: bundled SPICE kernels, no network, isolated global state
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session", autouse=True)
-def spice_offline() -> None:
+def _isolated_cache_dir(tmp_path_factory: pytest.TempPathFactory):
+    """Point ``CONTIGO_CACHE_DIR`` at a session temp dir.
+
+    A developer's real per-user cache must never affect the tests.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("CONTIGO_CACHE_DIR", str(tmp_path_factory.mktemp("contigo_cache")))
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def spice_offline(_isolated_cache_dir) -> None:
     """Load the bundled SPICE kernels and mark the NAIF download as done.
 
     ``SPICEEphem.load_kernels`` otherwise asks NAIF for file modification

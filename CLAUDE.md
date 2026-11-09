@@ -13,10 +13,7 @@ Install in editable mode with dev and plotting extras:
 pip install -e ".[dev,plot]"
 ```
 
-For Orekit support:
-```bash
-pip install -e ".[orekit]"
-```
+Orekit is a core dependency; `orekit_utils.start_orekit()` downloads the Orekit data itself (there is no `orekit` extra).
 
 ## Common Commands
 
@@ -98,6 +95,12 @@ state = {
 }
 ```
 Check `config.state['orekit_loaded']` before using any Orekit feature. `OrekitEphem.__init__` and Orekit SRP classes call `orekit_utils.start_orekit()` automatically if not yet started.
+
+## Data and Network
+
+- `config.DATA_DIR` / `data_path()` is bundled, read-only package data. `config.cache_dir(sub)` is the per-user writable cache (`platformdirs` user cache dir, override with `CONTIGO_CACHE_DIR`); `config.find_data_file(name, sub)` looks up explicit path > cache > bundled.
+- `CONTIGO_OFFLINE=1` forbids downloads: `utils.dl_file` raises `config.OfflineError`, `wf_mtime` returns `None`, and the NAIF kernel freshness check is skipped. CI sets it; tests use a temporary `CONTIGO_CACHE_DIR`.
+- contigo never configures the root logger (only a `NullHandler` on `"contigo"`); call `logging.basicConfig(level=logging.INFO)` in your script to see its messages.
 
 ## Key Conventions
 
