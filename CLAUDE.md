@@ -8,9 +8,9 @@ CONTIGO is a Python library for computing Energy Dissipation Rate (EDR) and Effe
 
 ## Development Setup
 
-Install in editable mode with dev extras:
+Install in editable mode with dev and plotting extras:
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,plot]"
 ```
 
 For Orekit support:
@@ -35,7 +35,17 @@ pytest
 
 # Run a single test file
 pytest tests/test_spacecraft.py -v
+
+# Opt-in test tiers (skipped by default and in CI)
+pytest --run-network   # needs internet (NAIF, ICGEM, GitLab)
+pytest --run-orekit    # starts the Orekit JVM
+pytest --run-slow      # long-running tests
+pytest --run-all
 ```
+
+The default (fast) tier must not touch the network or start the JVM. Mark such tests
+`@pytest.mark.network`, `@pytest.mark.orekit` or `@pytest.mark.slow`. The plan for the
+test suite and Phase 0 work is in `docs/phase0_plan.md`.
 
 ## Java Backend (Orekit utilities)
 
