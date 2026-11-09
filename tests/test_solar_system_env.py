@@ -61,6 +61,8 @@ def test_ep01b_env_bit_identical_to_direct_spkpos(esa_constellation):
 
     assert r.shape == (2, len(sc.sspice_et), 3)
     assert np.array_equal(et, sc.sspice_et)
+    assert np.array_equal(gps, sc.sspice_gps)
+    assert np.array_equal(utc, sc.sc_utc)
     for i, body in enumerate(BODIES):
         direct = spice.spkpos(body, sc.sspice_et, "ITRF93", "NONE", "EARTH")[0] * 1000
         assert np.array_equal(r[i], direct)
@@ -82,11 +84,11 @@ def test_ep04_repeated_times_no_extra_provider_calls():
     first = _get(env, gps)
     assert prov.calls == 1
     second = _get(env, gps)
-    third = _get(env, gps[::-1])  # reordered subset is also cached
+    third = _get(env, gps[3:7][::-1])  # reordered strict subset is also cached
 
     assert prov.calls == 1
     assert np.array_equal(first, second)
-    assert np.array_equal(first[:, ::-1], third)
+    assert np.array_equal(first[:, 3:7][:, ::-1], third)
     assert first.shape == (2, 10, 3)
 
 
@@ -117,14 +119,25 @@ def test_ep04_tolerance_binning():
     Expected: bins are ``round(gps / tol)``. With tol=0.5, 100.0 and 100.2 both
     map to bin 200 (one cache entry); 100.3 maps to bin 201 (a new entry). A
     later request for another time in a cached bin makes no provider call.
+
+    This also pins CURRENT behaviour (to be logged as a finding): when two
+    uncached times fall in the same bin they are both sent to the provider
+    (duplicate provider work within a bin) and the last one written wins, so
+    the bin holds the position of 100.2, not of the first-requested 100.0.
     """
     prov = FakeProvider()
     env = _env(prov, tolerance=0.5)
 
     r = _get(env, [100.0, 100.2])
     assert prov.calls == 1
+    # both times are requested from the provider ...
+    assert np.array_equal(prov.requested[0], np.array([100.0, 100.2]) + ET_OFFSET)
     assert set(env._cache) == {200}
+    # ... and the shared bin holds the last-requested value (100.2)
+    expected = FakeProvider()(BODIES, ephem_time=np.array([100.2 + ET_OFFSET]))
+    assert np.array_equal(env._cache[200], expected[:, 0])
     assert np.array_equal(r[:, 0], r[:, 1])  # same bin -> same stored position
+    assert np.array_equal(r[:, 0], expected[:, 0])
 
     _get(env, [99.8])  # bin 200 again
     assert prov.calls == 1
@@ -232,14 +245,11 @@ def test_ep04_get_ephem_returns_inputs_and_positions():
 # ---------------------------------------------------------------------------
 # EP-05 GM lookup
 # ---------------------------------------------------------------------------
-class _Prov:
-    """Minimal provider with a configurable ``ephemeris`` name."""
-
-    def __init__(self, ephemeris: str) -> None:
-        self.ephemeris = ephemeris
-
-    def __call__(self, body, **kw):  # pragma: no cover - never called here
-        raise AssertionError("provider should not be called")
+def _prov(ephemeris: str) -> FakeProvider:
+    """``FakeProvider`` reporting the given ephemeris name."""
+    prov = FakeProvider()
+    prov.ephemeris = ephemeris
+    return prov
 
 
 @pytest.mark.parametrize("name", ["de440", "de440s"])
@@ -249,8 +259,10 @@ def test_ep05_gm_from_provider_ephemeris(name):
     Expected values are ``constants.GMc['de440']`` (JPL DE440 GM, m^3/s^2) for
     both 'de440' and 'de440s'; lower-case body names are upper-cased.
     """
-    env = SolarSystemEnvironment(["moon", "Sun", "EARTH"], 0.001, _Prov(name))
+    prov = _prov(name)
+    env = SolarSystemEnvironment(["moon", "Sun", "EARTH"], 0.001, prov)
 
+    assert prov.calls == 0  # GM lookup alone never calls the provider
     gm = GMc["de440"]
     assert env.bodies == ["MOON", "SUN", "EARTH"]
     assert np.array_equal(env.GM, [gm["MOON"], gm["SUN"], gm["EARTH"]])
@@ -263,7 +275,7 @@ def test_ep05_gm_uses_provider_ephemeris_key():
     Expected: an ephemeris with no entry in ``GMc`` raises ``KeyError``.
     """
     with pytest.raises(KeyError):
-        SolarSystemEnvironment(BODIES, 0.001, _Prov("de999"))
+        SolarSystemEnvironment(BODIES, 0.001, _prov("de999"))
 
 
 def test_ep05_unknown_body_raises():
@@ -273,7 +285,9 @@ def test_ep05_unknown_body_raises():
 
 
 @pytest.mark.xfail(
-    strict=True, reason="EP-05 proposal: clear ValueError for unknown body"
+    strict=True,
+    raises=KeyError,
+    reason="EP-05 proposal: clear ValueError for unknown body",
 )
 def test_ep05_unknown_body_value_error():
     """EP-05 (proposal): an unknown body should raise a clear ``ValueError``."""

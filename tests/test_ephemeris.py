@@ -29,9 +29,11 @@ SUN_RANGE = (1.470e11, 1.521e11)  # perihelion/aphelion distance, m (see EP-01)
 MOON_RANGE = (3.56e8, 4.07e8)  # lunar perigee/apogee distance, m
 ONE_KM = 1000.0
 # Position tolerance per body (m). SPICE ITRF93 and Orekit's ITRF differ in
-# orientation by ~6 mas (3e-8 rad), a *rotation*: ~11 m at the Moon but ~4.5 km at
-# the Sun. The plan's flat 1 km is therefore met by the Moon only.
+# orientation by ~6 mas (3e-8 rad), a *rotation*: measured max 11.4 m at the Moon
+# but 4562.5 m at the Sun. The plan's flat 1 km is therefore met by the Moon only;
+# the Sun cap of 10 km is ~2.2x the measured miss (the Moon cap is ~88x).
 POS_TOL = {"SUN": 10 * ONE_KM, "MOON": ONE_KM}
+GPS_UTC_LEAP_2018 = pd.Timedelta(seconds=18)  # GPS - UTC in 2018
 
 
 def _esa(constellation: Constellation):
@@ -43,6 +45,13 @@ def _orekit_positions(ref: pd.DataFrame) -> np.ndarray:
     sun = ref[["ecef_sn_px", "ecef_sn_py", "ecef_sn_pz"]].to_numpy()
     moon = ref[["ecef_mn_px", "ecef_mn_py", "ecef_mn_pz"]].to_numpy()
     return np.stack([sun, moon])
+
+
+def _assert_epochs_aligned(sc, ref: pd.DataFrame) -> None:
+    """Spacecraft epochs equal the reference ``DateTime`` rows (GPS = UTC + 18 s)."""
+    gps = pd.DatetimeIndex(sc.sc_utc).tz_localize(None) + GPS_UTC_LEAP_2018
+    assert len(gps) == len(ref)
+    assert (gps == pd.DatetimeIndex(ref["DateTime"])).all()
 
 
 def test_ep01_spice_sun_moon_shape_and_range(esa_constellation):
@@ -125,10 +134,12 @@ def test_ep06_spice_vs_stored_orekit_positions(esa_constellation, orekit_ref_sma
     ~1 km. Measured: Moon max 11.4 m, Sun max 4562.5 m. The Sun miss is not an
     ephemeris error: the distances agree to 6 mm and the offset is a 3e-8 rad
     (~6 mas) frame-orientation difference between SPICE ITRF93 and Orekit's ITRF,
-    which scales with distance. So: Moon < 1 km, Sun < 10 km (3e-8 rad margin x3),
-    and the radial (distance) difference < 1 m for both bodies.
+    which scales with distance. So: Moon < 1 km, Sun < 10 km (about 2.2x the
+    measured 4562.5 m), and the radial (distance) difference < 1 m for both
+    bodies. Epochs are checked to line up exactly before comparing rows.
     """
     sc = _esa(esa_constellation)
+    _assert_epochs_aligned(sc, orekit_ref_small)
     r_spice = SPICEEphem()(BODIES, ephem_time=sc.sspice_et)
     r_orekit = _orekit_positions(orekit_ref_small)
 
@@ -141,7 +152,7 @@ def test_ep06_spice_vs_stored_orekit_positions(esa_constellation, orekit_ref_sma
 
 
 @pytest.mark.orekit
-def test_ep06b_orekit_ephem_vs_spice(esa_constellation):
+def test_ep06b_orekit_ephem_vs_spice(esa_constellation, orekit_ref_small):
     """EP-06b: live ``OrekitEphem`` matches ``SPICEEphem`` and gives the same
     ``ThirdBodyEnv`` accelerations.
 
@@ -152,21 +163,37 @@ def test_ep06b_orekit_ephem_vs_spice(esa_constellation):
     from contigo.ephemeris.orekit_ephem import OrekitEphem
 
     sc = _esa(esa_constellation)
-    spice_prov = SPICEEphem()
-    orekit_prov = OrekitEphem()
+    _assert_epochs_aligned(sc, orekit_ref_small)
 
-    utc = list(pd.to_datetime(sc.sc_utc).to_pydatetime())
-    r_spice = spice_prov(BODIES, ephem_time=sc.sspice_et)
-    r_orekit = orekit_prov(BODIES, utc_time=utc)
-    assert r_orekit.shape == r_spice.shape
-    diff = np.linalg.norm(r_orekit - r_spice, axis=2)
+    # Environments are preloaded with the spacecraft epochs, so each provider
+    # is called once; positions are read back through get_ephem and the very
+    # same environments then feed ThirdBodyEnv (no second Orekit evaluation).
+    envs = {
+        name: SolarSystemEnvironment(
+            BODIES,
+            tolerance=0.001,
+            provider=prov,
+            ephem_time=sc.sspice_et,
+            gps_time=sc.sspice_gps,
+            utc_time=sc.sc_utc,
+        )
+        for name, prov in (("spice", SPICEEphem()), ("orekit", OrekitEphem()))
+    }
+    r = {
+        name: env.get_ephem(
+            ephem_time=sc.sspice_et, gps_time=sc.sspice_gps, utc_time=sc.sc_utc
+        )[3]
+        for name, env in envs.items()
+    }
+    assert r["orekit"].shape == r["spice"].shape == (2, len(sc.sspice_et), 3)
+    diff = np.linalg.norm(r["orekit"] - r["spice"], axis=2)
     for i, body in enumerate(BODIES):
         assert diff[i].max() < POS_TOL[body], f"{body} max diff {diff[i].max():.3f} m"
 
-    acc = {}
-    for name, prov in (("spice", spice_prov), ("orekit", orekit_prov)):
-        env = SolarSystemEnvironment(BODIES, tolerance=0.001, provider=prov)
-        acc[name] = ThirdBodyEnv().acceleration(esa_constellation, env)["ESA"]
+    acc = {
+        name: ThirdBodyEnv().acceleration(esa_constellation, env)["ESA"]
+        for name, env in envs.items()
+    }
     # Compare vector norms, not components: a component near zero has a huge
     # *relative* error from the ~3e-8 rad frame offset (elementwise rtol fails
     # for ~2% of components, max 6e-5, with absolute errors < 5e-14 m/s^2).
