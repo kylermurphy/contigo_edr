@@ -170,7 +170,7 @@ test turns green, and CI forces removal of the marker, when the matching refacto
 | SC-09 | Leap seconds | UTC 2017-01-01T00:00:00 equals GPS 2017-01-01T00:00:18 (and +13 s in 2005, the CHAMP era) |
 | SC-10 | `spherical()` | known points on the x-axis, y-axis and pole → `[r, lat, lon]` |
 | SC-11 | SP3 loader (synthetic 1-sat and 2-sat SP3 in `tmp_path`) | km → m, dm/s → m/s, correct epochs. **xfail** until R8 |
-| SC-11b | Overlapping SP3 files (same satellite and epoch in two daily files, as in `testing_champ` cell 7) | **[PROPOSED]** duplicates on (ID, time) are dropped when loading, keeping the first. **xfail** until R8 |
+| SC-11b | Overlapping SP3 files (same satellite and epoch in two daily files, as in `testing_champ` cell 7) | **[DECISION]** duplicates on (ID, time) are dropped when loading, keeping the first. **xfail** until R8 |
 | SC-12 | `state_data` cache | invalidated after `load_from_arrays` |
 
 ### 4.2 Constellation (`tests/test_constellation.py`, PR **T1**)
@@ -287,7 +287,7 @@ Three Sonnet `Explore` agents read all 10 notebooks. Main points:
   3-value `get_ephem`, and `SPICEEphem(et=...)`.
 - New finding **F18**: possible SRP units mismatch in `SRPOrekitCB` (see FO-11); T5 checks it.
 
-Updated fates (replace the §5.1 table once Kyle agrees):
+Updated fates (**[DECISION]**, agreed 2026-11-09; these replace the §5.1 table):
 
 | Notebook | Fate | Condition / reason |
 |----------|------|--------------------|
