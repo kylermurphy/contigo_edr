@@ -1,4 +1,4 @@
-<!-- building: mvn clean pacakge -->
+<!-- building: mvn clean package (writes the jar to ../contigo/java/) -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
@@ -20,6 +20,8 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- fixed entry timestamps for reproducible jars; bump on a release -->
+        <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
     </properties>
 
     <!-- Dependencies -->
@@ -40,6 +42,17 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
+            </plugin>
+
+            <!-- Jar Plugin: write the jar into the Python package (package
+                 data, found by contigo.contigo_utils.orekit_utils) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <outputDirectory>${project.basedir}/../contigo/java</outputDirectory>
+                </configuration>
             </plugin>
         </plugins>
     </build>

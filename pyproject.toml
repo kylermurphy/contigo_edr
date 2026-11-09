@@ -83,6 +83,7 @@ contigo = [
     "data/*.bsp",
     "data/*.hdf",
     "data/EIGEN-2.gfc",
+    "java/*.jar",
 ]
 
 [tool.black]

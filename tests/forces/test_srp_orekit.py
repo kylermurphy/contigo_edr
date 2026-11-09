@@ -5,11 +5,8 @@ Every test here is marked ``orekit`` **and** ``network``: importing
 queries GitLab for the latest Orekit data commit and may download the data
 (F4). Imports are therefore done inside the test functions only.
 
-Side effect (F12, fixed by R5): when GitLab reports a newer data commit,
-``start_orekit()`` deletes the tracked ``contigo/data/orekit_data_*.zip`` and
-downloads a new one, leaving the working tree dirty. After running these
-tests, restore it with ``git checkout -- contigo/data`` and delete the new
-untracked zip.
+Since R5 the Orekit data zip is downloaded into the (session temp) cache
+dir, so these tests no longer modify ``contigo/data``.
 
 Expected SRP magnitude (cannonball, no eclipse)::
 
