@@ -114,18 +114,18 @@ class Spacecraft:
                 raise ValueError("Either (state, time) or state_file must be provided")
             self.load_from_file(self.state_file)
 
-        # normalize time
-        self._normalize_time()
-        # normalize units
-        self._normalize_units()
-
     def load_from_arrays(
         self,
         state: npt.ArrayLike,
         time: npt.ArrayLike,
         sc_id: npt.ArrayLike | None = None,
     ) -> None:
-        """Load spacecraft state from arrays passed in creation.
+        """Load spacecraft state from arrays.
+
+        Called by ``__post_init__`` and safe to call on an existing object:
+        the input arrays are copied (the caller's data is never modified),
+        and the time axes, unit conversion (``unit_input``) and physical
+        properties are recomputed for the new samples.
 
         Parameters
         ----------
@@ -148,7 +148,8 @@ class Spacecraft:
         # clear any cached data
         self._clear_cache()
 
-        s = np.asarray(state, dtype=float)
+        # always own the state so the caller's array is never modified
+        s = np.array(state, dtype=float, copy=True)
         if s.ndim != 2 or s.shape[1] != 6:
             raise ValueError("state must have shape (N,6)")
 
@@ -178,6 +179,8 @@ class Spacecraft:
         # Normalize physical properties
         self._normalize_properties(len(t), df=None)
 
+        self._finalize()
+
     # ------------------------------------------------------------------
     # Loader / normalizer (file-based)
     # ------------------------------------------------------------------
@@ -188,6 +191,10 @@ class Spacecraft:
         read_kwargs: dict | None = None,
     ) -> None:
         """Load spacecraft state from one or more files.
+
+        Called by ``__post_init__`` and safe to call on an existing object:
+        the time axes, unit conversion (``unit_input``) and physical
+        properties are recomputed for the new samples.
 
         Parameters
         ----------
@@ -286,6 +293,8 @@ class Spacecraft:
         # Normalize physical properties (from columns if available)
         self._normalize_properties(len(t), df=df_all)
 
+        self._finalize()
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -330,14 +339,28 @@ class Spacecraft:
         self.cr_arr = norm(self.cr, self.cr_col)
         self.srp_area_arr = norm(self.srp_area, self.srp_area_col)
 
+    def _finalize(self) -> None:
+        """Finish a load: time axes, unit conversion and cache invalidation.
+
+        Run exactly once at the end of every ``load_from_*`` call, on the
+        freshly loaded (raw-unit) ``state_ecef``, so units are converted once
+        per load and never cumulatively.
+        """
+        self._normalize_time()
+        self._normalize_units()
+        self._clear_cache()
+
     def _normalize_units(self):
         """Convert input units to SI (meters, m/s).
+
+        Rebinds ``state_ecef`` rather than scaling it in place, so no array
+        shared with a caller is ever modified.
 
         Raises:
             ValueError: if unit is not 'm' or 'km'
         """
         if self.unit in ["km", "kilometer", "kilometre"]:
-            self.state_ecef *= 1000.0
+            self.state_ecef = self.state_ecef * 1000.0
         elif self.unit in ["m", "meter", "metre"]:
             pass
         else:
