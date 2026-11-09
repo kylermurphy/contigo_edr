@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 from _support import ESA_PROPS, MULTI_MEMBERS, make_circular_orbit
 
+from contigo.contigo_utils.utils import df_sp3
 from contigo.spacecraft import Spacecraft
 
 #: TDB - GPS offset at J2000-era epochs: TDB - TAI = 32.184 s (+ periodic term
@@ -308,8 +309,11 @@ def test_sc05_zipped_and_mixed_csv(tmp_path):
 
     Expected: pandas infers the zip compression from the extension; the
     explicit list is concatenated in sorted path order (``a_*`` before ``b_*``).
+    The second file starts a day later so its (``NO_ID``, time) rows are not
+    duplicates of the first file's (SC-11b drops duplicates).
     """
-    dfa, dfb = _frame(9), _frame(11, alt=500e3, inc_deg=87.0)
+    dfa = _frame(9)
+    dfb = _frame(11, alt=500e3, inc_deg=87.0, t0="2018-01-03 00:00:00")
     zipped = tmp_path / "a_orbit.csv.zip"
     plain = tmp_path / "b_orbit.csv"
     dfa.to_csv(zipped, index=False, compression="zip")
@@ -579,12 +583,6 @@ def _si(rec):
     return [c * 1000.0 for c in pos] + [c / 10.0 for c in vel]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="F8/R8: df_sp3 calls fn.lower() on a Path (AttributeError) so SP3 "
-    "files cannot be loaded through Spacecraft",
-)
 def test_sc11_sp3_one_satellite(tmp_path):
     """SC-11: 1-satellite SP3 -> km to m, dm/s to m/s, correct epochs.
 
@@ -602,12 +600,6 @@ def test_sc11_sp3_one_satellite(tmp_path):
     np.testing.assert_allclose(np.diff(sc.sspice_gps), 900.0, atol=1e-6)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="F8/R8: df_sp3 calls fn.lower() on a Path and has a placeholder for "
-    "multi-satellite epochs (time column never assigned)",
-)
 def test_sc11_sp3_two_satellites(tmp_path):
     """SC-11: 2-satellite SP3 -> every record gets its own epoch.
 
@@ -628,12 +620,6 @@ def test_sc11_sp3_two_satellites(tmp_path):
         assert (sub.stime == pd.DatetimeIndex(SP3_EPOCHS)).all()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="F8/R8: df_sp3 fails on Path input; duplicate (ID, time) rows from "
-    "overlapping SP3 files are also not yet dropped",
-)
 def test_sc11b_overlapping_sp3_files_drop_duplicates(tmp_path):
     """SC-11b: same satellite and epoch in two daily files is loaded once.
 
@@ -660,6 +646,102 @@ def test_sc11b_overlapping_sp3_files_drop_duplicates(tmp_path):
     kept = sc.state_ecef[np.isclose(offsets, 1800.0, rtol=0, atol=1e-3)]
     assert len(kept) == 1
     np.testing.assert_allclose(kept[0], _si(rec1[(2, "L48")]), rtol=1e-12)
+
+
+def test_sc11_df_sp3_path_input_and_columns(tmp_path):
+    """SC-11 (extra): ``df_sp3`` accepts a ``Path`` directly.
+
+    Expected: columns ``sat, time, x, y, z, vx, vy, vz``; the vehicle ID is the
+    3-character SP3 ID ``'L48'`` (without the ``P`` record letter); values in
+    SI. A ``str`` path gives the same frame; unknown keywords raise TypeError.
+    """
+    path = tmp_path / "one_sat.sp3"
+    _write_sp3(path, SP3_EPOCHS, SP3_A)
+    df = df_sp3(path)
+    assert list(df.columns) == ["sat", "time", "x", "y", "z", "vx", "vy", "vz"]
+    assert list(df["sat"]) == ["L48"] * 3
+    assert (pd.DatetimeIndex(df["time"]) == pd.DatetimeIndex(SP3_EPOCHS)).all()
+    expected = np.array([_si(SP3_A[(k, "L48")]) for k in range(3)])
+    np.testing.assert_allclose(df[STATE_COLS].to_numpy(), expected, rtol=1e-12)
+    pd.testing.assert_frame_equal(df_sp3(str(path)), df)
+    with pytest.raises(TypeError, match="keyword"):
+        df_sp3(path, sep=",")
+
+
+def test_sc11_sp3_without_velocity_raises(tmp_path):
+    """SC-11 (extra): an SP3 file with no ``V`` records raises ValueError.
+
+    Expected: Spacecraft needs velocities, so a position-only file is rejected
+    instead of loading NaN velocities.
+    """
+    path = tmp_path / "pos_only.sp3"
+    _write_sp3(path, SP3_EPOCHS, SP3_A)
+    text = path.read_text().splitlines(keepends=True)
+    path.write_text("".join(ln for ln in text if not ln.startswith("V")))
+    with pytest.raises(ValueError, match="velocity"):
+        df_sp3(path)
+    with pytest.raises(ValueError, match="velocity"):
+        Spacecraft(state_file=path, tscale_input="GPS")
+
+
+def test_sc11_sp3_ignores_correlation_records(tmp_path):
+    """SC-11 (extra): ``EP``/``EV`` correlation records are ignored.
+
+    Expected: inserting an ``EP`` and ``EV`` line after every record leaves the
+    loaded frame identical to the file without them.
+    """
+    plain = tmp_path / "plain.sp3"
+    _write_sp3(plain, SP3_EPOCHS, SP3_A)
+    lines = plain.read_text().splitlines(keepends=True)
+    corr = []
+    for ln in lines:
+        corr.append(ln)
+        if ln.startswith("P"):
+            corr.append("EP  55   55   55  222 1234567 -1234567 5999999\n")
+        elif ln.startswith("V"):
+            corr.append("EV  22   22   22  111 1234567  1234567 1234567\n")
+    with_corr = tmp_path / "corr.sp3"
+    with_corr.write_text("".join(corr))
+    pd.testing.assert_frame_equal(df_sp3(with_corr), df_sp3(plain))
+
+
+def test_sc11_sp3_bad_value_record_dropped(tmp_path, caplog):
+    """SC-11 (extra): a record with a 999999.999999 position is dropped.
+
+    Expected: the middle epoch of L48 is written with a bad x position, so
+    only epochs 0 and 1800 s remain, and a warning is logged.
+    """
+    recs = dict(SP3_A)
+    pos, vel = recs[(1, "L48")]
+    recs[(1, "L48")] = ((999999.999999, pos[1], pos[2]), vel)
+    path = tmp_path / "bad.sp3"
+    _write_sp3(path, SP3_EPOCHS, recs)
+    with caplog.at_level("WARNING"):
+        df = df_sp3(path)
+    assert len(df) == 2
+    assert (pd.DatetimeIndex(df["time"]) == pd.DatetimeIndex(SP3_EPOCHS[::2])).all()
+    assert "bad" in caplog.text
+
+
+def test_sc11b_overlapping_csv_files_drop_duplicates(tmp_path):
+    """SC-11b (extra): the (ID, time) dedup also applies to CSV files.
+
+    Expected: two CSV files share 5 of 15 samples (the second file's copies
+    have x shifted by 1 m); 25 unique rows load and the shared rows carry the
+    first file's values.
+    """
+    df = _frame(n=25)
+    first = df.iloc[:15]
+    second = df.iloc[10:].copy()
+    second["x"] += 1.0
+    first.to_csv(tmp_path / "a.csv", index=False)
+    second.to_csv(tmp_path / "b.csv", index=False)
+    sc = Spacecraft(state_file=str(tmp_path / "*.csv"), tscale_input="GPS")
+    assert sc.N == 25
+    np.testing.assert_allclose(sc.state_ecef[:15], first[STATE_COLS].to_numpy())
+    np.testing.assert_allclose(
+        sc.state_ecef[15:], second[STATE_COLS].to_numpy()[5:], rtol=1e-12
+    )
 
 
 # ---------------------------------------------------------------------------

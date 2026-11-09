@@ -5,6 +5,7 @@ added: 18/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 import glob
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,8 @@ import pandas as pd
 import spiceypy as spice
 
 from contigo.contigo_utils import time_utils, utils
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -201,6 +204,12 @@ class Spacecraft:
         read_kwargs : dict | None, optional
             Keyword arguments forwarded to the loader function, by default None.
 
+        Notes
+        -----
+        Files are loaded in sorted name order. Rows that repeat a
+        (spacecraft ID, time) pair already loaded, e.g. from overlapping daily
+        files, are dropped so the first occurrence is kept.
+
         Raises
         ------
         ValueError
@@ -276,6 +285,24 @@ class Spacecraft:
                 .astype("category")
                 .to_numpy()
             )
+
+        # Drop duplicate (spacecraft ID, time) rows, e.g. from overlapping
+        # daily files, keeping the first occurrence (files are loaded in
+        # sorted name order).
+        dup = pd.DataFrame({"id": np.asarray(sc_id_arr), "t": t}).duplicated(
+            keep="first"
+        )
+        n_dup = int(dup.sum())
+        if n_dup:
+            logger.info(
+                "Dropped %d duplicate (spacecraft ID, time) row(s) while loading",
+                n_dup,
+            )
+            keep = ~dup.to_numpy()
+            s = s[keep]
+            t = t[keep]
+            sc_id_arr = sc_id_arr[keep]
+            df_all = df_all.loc[keep].reset_index(drop=True)
 
         # Commit normalized state
         self.state_ecef = s
