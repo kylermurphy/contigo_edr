@@ -28,7 +28,6 @@ class ForceModel(Protocol):
     """
 
     name: str
-    is_conservative: bool
 
     def acceleration(
         self, constellation: Constellation, solarsys_env: SolarSystemEnvironment
@@ -40,7 +39,7 @@ class ForceModel(Protocol):
         ----------
         constellation : Constellation
             Collection of spacecraft objects with state vectors.
-        environment : SolarSystemEnvironment
+        solarsys_env : SolarSystemEnvironment
             Ephemeris provider and cache.
 
         Returns
@@ -61,13 +60,11 @@ class ForceModel(Protocol):
         ----------
         constellation : Constellation
             Collection of spacecraft objects with state vectors.
-        environment : SolarSystemEnvironment
-            Ephemeris provider and cache.
 
         Returns
         -------
         dict
             Dictionary mapping spacecraft IDs to potential arrays
-            of shape (N, 3).
+            of shape (N,).
         """
         ...

@@ -4,12 +4,11 @@ Only models that can be built without the JVM or GMAT are used here:
 ``ThirdBodyEnv`` and ``EarthPotential`` (construction does not read the
 ``.gfc`` file). ``SRPOrekitCB`` starts the JVM at import (F4).
 
-Note on F6: ``ThirdBodyEnv`` and ``EarthPotential`` *subclass* ``ForceModel``
-explicitly, so ``isinstance`` is True for them through normal inheritance,
-even though neither defines ``is_conservative`` (the Protocol only annotates
-it). The structural check that F6 describes fails for a model that satisfies
-the interface without subclassing, which is what new force models written
-"to the protocol" (and the test doubles) do.
+Note on F6/R6: ``ThirdBodyEnv`` and ``EarthPotential`` *subclass*
+``ForceModel`` explicitly, so ``isinstance`` is True for them through normal
+inheritance. The Protocol used to declare ``is_conservative``, which no model
+defined, so duck-typed models (and the test doubles) failed the structural
+check. R6 removed the member; the structural check now passes.
 
 added: 09/11/2026 Claude Code
 """
@@ -52,15 +51,20 @@ def test_subclassed_models_are_force_models(cls):
     assert isinstance(cls(), ForceModel)
 
 
+def test_protocol_does_not_declare_is_conservative():
+    """FO-09/R6: ``is_conservative`` is no longer part of the Protocol; the
+    only declared data member is ``name``."""
+    assert "is_conservative" not in getattr(ForceModel, "__annotations__", {})
+    assert "is_conservative" not in getattr(ForceModel, "__protocol_attrs__", set())
+    assert getattr(ForceModel, "__annotations__", {}) == {"name": str}
+
+
 @pytest.mark.parametrize("cls", MODELS, ids=lambda c: c.__name__)
-@pytest.mark.xfail(
-    strict=True,
-    raises=AttributeError,
-    reason="F6/R6: ForceModel declares is_conservative which no model defines",
-)
-def test_models_define_declared_is_conservative(cls):
+def test_models_define_declared_members(cls):
     """FO-09: every member the Protocol declares exists on the model."""
-    assert isinstance(cls().is_conservative, bool)
+    model = cls()
+    assert isinstance(model.name, str)
+    assert callable(model.acceleration) and callable(model.potential)
 
 
 @pytest.mark.parametrize("cls", DOUBLES, ids=lambda c: c.__name__)
@@ -73,11 +77,6 @@ def test_doubles_implement_protocol_methods(cls):
 
 
 @pytest.mark.parametrize("cls", DOUBLES, ids=lambda c: c.__name__)
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="F6/R6: ForceModel declares is_conservative which no model defines",
-)
 def test_structural_models_are_force_models(cls):
     """FO-09: a model with ``name``/``acceleration``/``potential`` but no
     ``ForceModel`` base class satisfies the runtime-checkable Protocol."""
