@@ -43,6 +43,7 @@ dependencies = [
     "numba>=0.57",
     "tqdm",
     "requests",
+    "platformdirs>=3",
     "pyshtools",
     "spiceypy>=8.0.2",
     "orekit-jpype[jdk4py]>=13.1.4",
@@ -51,8 +52,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-orekit = ["orekitdata @ git+https://gitlab.orekit.org/orekit/orekit-data.git"]
-
 plot = ["matplotlib>=3.7"]
 
 test = [

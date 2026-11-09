@@ -23,6 +23,15 @@ from contigo.contigo_utils.utils import wf_mtime as _real_wf_mtime
 URL = "https://example.invalid/file.bin"
 
 
+@pytest.fixture(autouse=True)
+def _online(monkeypatch):
+    """These tests mock ``requests`` and exercise the online code path.
+
+    CI sets ``CONTIGO_OFFLINE=1``, which would short-circuit both helpers.
+    """
+    monkeypatch.delenv("CONTIGO_OFFLINE", raising=False)
+
+
 class FakeResponse:
     """Minimal stand-in for ``requests.Response``."""
 
