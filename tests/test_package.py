@@ -781,12 +781,15 @@ def test_bound_names_star_import_uses_resolver():
     assert seen == [("sub", 1)]
 
 
-def test_name_resolves_through_star_import_one_level():
+def test_name_resolves_through_star_import_one_level(monkeypatch):
     """NB-01: a name re-exported by a star import in a real module resolves.
 
     ``contigo.forces.third_body_acc`` binds ``ForceModel`` by an explicit
     import; the star resolver finds names in a contigo module by AST only.
+    Earlier tests may already have imported the module, so it is removed from
+    ``sys.modules`` for this test; the resolver must not import it again.
     """
+    monkeypatch.delitem(sys.modules, "contigo.forces.base", raising=False)
     star = ast.parse("from contigo.forces.base import *").body[0]
     names = _star_names(star, "contigo.forces")
     assert "ForceModel" in names
