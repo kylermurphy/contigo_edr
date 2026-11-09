@@ -33,9 +33,9 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff black
       - name: ruff
-        run: ruff check tests
+        run: ruff check tests contigo/plotting
       - name: black
-        run: black --check tests
+        run: black --check tests contigo/plotting
 
   test:
     runs-on: ubuntu-latest
