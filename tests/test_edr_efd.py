@@ -20,6 +20,7 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -223,13 +224,6 @@ def test_edr_stacked_force_equals_separate_forces():
     np.testing.assert_allclose(stk, sep, rtol=1e-12, atol=1e-9)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="NEW: compute_edr keys accelerations by model.name, so two force "
-    "models with the same name silently overwrite each other (edr_efd.py "
-    "acc_con[model.name] = ...) and only the last one is integrated",
-)
 def test_edr_two_forces_with_same_name_both_count():
     """ED-03: two (N, 3) forces sharing a ``name`` are both integrated.
 
@@ -242,6 +236,43 @@ def test_edr_two_forces_with_same_name_both_count():
     edr = EDRDensity(con, _fake_env(), forces, FakePotential()).compute_edr()["X"]
     expected = 2 * k * _speed(con) ** 2 * _elapsed(con)
     np.testing.assert_allclose(edr, expected, rtol=1e-10, atol=1e-6)
+
+
+def test_edr_same_name_forces_unique_keys_and_warning(caplog):
+    """F22: repeated force names get unique keys and log a WARNING.
+
+    Expected keys of ``accelerations``: ``FakeDrag``, ``FakeDrag_2``,
+    ``Drag``, ``FakeDrag_3`` in model order; one warning per repeat. A model
+    literally named like a generated key does not collide with it.
+    """
+    con = _circular(inc_deg=0.0)
+    forces = [FakeForce(1e-6), FakeForce(2e-6), FakeForce(1e-6, "Drag")]
+    forces += [FakeForce(3e-6), FakeForce(1e-6, "Drag_2"), FakeForce(1e-6, "Drag")]
+    calc = EDRDensity(con, _fake_env(), forces, FakePotential())
+    with caplog.at_level(logging.WARNING, logger="contigo.edr_efd"):
+        calc.compute_edr()
+
+    keys = ["FakeDrag", "FakeDrag_2", "Drag", "FakeDrag_3", "Drag_2", "Drag_3"]
+    assert list(calc.accelerations) == keys
+    for key, model in zip(keys, forces, strict=True):
+        want = model.acceleration(con, None)["X"]
+        np.testing.assert_array_equal(calc.accelerations[key]["X"], want)
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warned) == 3
+    assert "'FakeDrag'" in warned[0].getMessage()
+    assert "'FakeDrag_2'" in warned[0].getMessage()
+    assert "'Drag_3'" in warned[2].getMessage()
+
+
+def test_edr_unique_force_names_no_warning(caplog):
+    """F22: distinct names keep their plain keys and log nothing."""
+    con = _circular(inc_deg=0.0)
+    forces = [FakeForce(1e-6, "Drag"), ZPush(1e-3, "ZPush")]
+    calc = EDRDensity(con, _fake_env(), forces, FakePotential())
+    with caplog.at_level(logging.WARNING, logger="contigo.edr_efd"):
+        calc.compute_edr()
+    assert list(calc.accelerations) == ["Drag", "ZPush"]
+    assert not caplog.records
 
 
 # ---------------------------------------------------------------------------

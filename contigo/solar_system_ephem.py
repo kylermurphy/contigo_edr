@@ -26,6 +26,22 @@ class SolarSystemEnvironment:
     Internally uses a dictionary keyed by quantized time
     O(1) lookup instead of O(N²) tolerance scans
     Cached arrays rebuilt lazily only if needed
+
+    Binning
+    -------
+    A GPS time ``t`` falls in bin ``round(t / tolerance)`` (``round(t)`` for
+    ``tolerance=0.0``; the exact value for ``tolerance=None``). Each bin holds a
+    single position per body: every time in a bin is served that one value.
+    When a bin is not yet cached, the *first time in request order* that falls
+    in it represents the bin: only that time is sent to the provider, once,
+    and its positions are cached for the bin. Later times in the same bin, in
+    the same request or in later ones, never change the cached value.
+
+    Raises
+    ------
+    ValueError
+        If the provider's ephemeris has no GM table, or a body has no GM entry
+        in that table (the message lists the known names).
     """
 
     def __init__(
@@ -50,15 +66,14 @@ class SolarSystemEnvironment:
         # value -> (Nb, 3) position array
         self._cache: dict[float, np.ndarray] = {}
 
+        # GM lookup first, so an unknown name fails before any provider call
+        self.GM = self._lookup_gm(provider.ephemeris, self.bodies)
+
         if self._check_times(ephem_time, gps_time, utc_time):
             ephem_time = np.asarray(ephem_time, dtype=float)
             gps_time = np.asarray(gps_time, dtype=float)
             utc_time = np.asarray(utc_time)
             self._load_times(ephem_time, gps_time, utc_time)
-
-        eph = provider.ephemeris[0:5]
-
-        self.GM = np.array([GMc[eph][bd] for bd in self.bodies], dtype=float)
 
     # ----------------------------------------------------------
     # Public API
@@ -135,23 +150,23 @@ class SolarSystemEnvironment:
         # Quantize requested times
         q_times = self._quantize(gps_time)
 
-        # Identify which quantized times are missing
-        missing = [
-            [i, et, utc, gps]
-            for i, et, utc, gps in zip(
-                q_times, ephem_time, utc_time, gps_time, strict=True
-            )
-            if i not in self._cache
-        ]
+        # Identify the missing bins. Each is requested once, represented by the
+        # first time (in request order) that falls in it; dicts keep insertion
+        # order, so later times in the same bin are ignored.
+        missing: dict = {}
+        for q, et, utc, gps in zip(
+            q_times, ephem_time, utc_time, gps_time, strict=True
+        ):
+            if q not in self._cache and q not in missing:
+                missing[q] = (et, utc, gps)
 
         if not missing:
             return
 
-        missing_qt, missing_et, missing_utc, missing_gps = list(
-            zip(*missing, strict=True)
-        )
+        missing_qt = list(missing)
+        missing_et, missing_utc, missing_gps = list(zip(*missing.values(), strict=True))
 
-        # Call provider once for all missing times
+        # Call provider once for all missing bins
         r_new = self._provider(
             self.bodies,
             ephem_time=missing_et,
@@ -159,10 +174,38 @@ class SolarSystemEnvironment:
             utc_time=missing_utc,
         )
 
-        # Store per-time slice in dictionary
+        # Store per-bin slice in dictionary
         for i, t in enumerate(missing_qt):
-            # r_new shape = (Nb, Nt_missing, 3)
+            # r_new shape = (Nb, N_missing_bins, 3)
             self._cache[t] = r_new[:, i, :]
+
+    @staticmethod
+    def _lookup_gm(ephemeris: str, bodies: list[str]) -> np.ndarray:
+        """GM (m^3/s^2) of ``bodies`` from the table of ``ephemeris``.
+
+        The table is selected by the first five characters of the ephemeris
+        name (``'de440s'`` uses ``'de440'``).
+
+        Raises
+        ------
+        ValueError
+            Unknown ephemeris, or a body with no GM entry in its table.
+        """
+        eph = str(ephemeris)[0:5]
+        if eph not in GMc:
+            raise ValueError(
+                f"No GM table for ephemeris {ephemeris!r}; known ephemerides "
+                f"(matched on the first five characters): {sorted(GMc)}"
+            )
+        # skip metadata entries such as 'unit'
+        table = {k: v for k, v in GMc[eph].items() if not isinstance(v, str)}
+        unknown = [bd for bd in bodies if bd not in table]
+        if unknown:
+            raise ValueError(
+                f"Unknown body name(s) {unknown} for ephemeris {ephemeris!r}; "
+                f"known bodies: {sorted(table)}"
+            )
+        return np.array([table[bd] for bd in bodies], dtype=float)
 
     def _check_times(self, ephem_time, gps_time, utc_time):
         return not (ephem_time is None and gps_time is None and utc_time is None)

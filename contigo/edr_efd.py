@@ -3,6 +3,8 @@
 added: 30/03/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 from scipy.integrate import cumulative_simpson
@@ -11,6 +13,8 @@ import contigo.contigo_utils.constants as constants
 from contigo.constellation import Constellation
 from contigo.forces.base import ForceModel
 from contigo.solar_system_ephem import SolarSystemEnvironment
+
+logger = logging.getLogger(__name__)
 
 
 class EDRDensity:
@@ -211,6 +215,11 @@ class EDRDensity:
         -----
         Combines force model accelerations and gravitational potential
         to compute energy dissipation.
+
+        Every model in ``force_models`` is integrated. The accelerations are
+        also stored in ``self.accelerations``, keyed by ``model.name``; when a
+        name repeats, later models get ``name_2``, ``name_3``, ... and a
+        WARNING is logged.
         """
         # system is the constellation of spacecraft
         spacecraft_dict = self.constellation.spacecraft
@@ -227,11 +236,23 @@ class EDRDensity:
 
         # derive the accelerations from the force models
         # for the constellation
+        # keys are unique per model: a repeated name gets a suffix
+        # (name, name_2, name_3, ...) so every model is integrated
         acc_con = {}
         for model in self.force_models:
-            acc_con[model.name] = model.acceleration(
-                self.constellation, self.solarsys_env
-            )
+            name = model.name
+            key, n = name, 1
+            while key in acc_con:
+                n += 1
+                key = f"{name}_{n}"
+            if key != name:
+                logger.warning(
+                    "Force model name %r is used more than once; storing its "
+                    "accelerations under %r (all models are integrated).",
+                    name,
+                    key,
+                )
+            acc_con[key] = model.acceleration(self.constellation, self.solarsys_env)
 
         self.accelerations = acc_con
 
