@@ -15,6 +15,7 @@ added: 09/11/2026 Claude Code
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import contigo.config as config
@@ -46,6 +47,29 @@ def eigen2():
     return read_icgem_coeff(EIGEN2)
 
 
+@pytest.fixture
+def primed_cache(monkeypatch, eigen2):
+    """Load EIGEN-2 into the config.state potential cache without re-parsing."""
+    clm, slm, meta = eigen2
+    for key, val in {
+        "pot_coef_loaded": True,
+        "pot_file": "EIGEN-2.gfc",
+        "pot_clm": clm,
+        "pot_slm": slm,
+        "pot_r0": meta["r0"],
+        "pot_GM": meta["GM"],
+    }.items():
+        monkeypatch.setitem(config.state, key, val)
+    return eigen2
+
+
+@pytest.fixture
+def empty_cache(monkeypatch):
+    """Empty potential cache, so GravPot reads the file (first-load path)."""
+    monkeypatch.setitem(config.state, "pot_coef_loaded", False)
+    monkeypatch.setitem(config.state, "pot_file", None)
+
+
 def _zero_coeffs(lmax):
     clm = np.zeros((lmax + 1, lmax + 1))
     slm = np.zeros((lmax + 1, lmax + 1))
@@ -71,7 +95,6 @@ def test_read_icgem_eigen2_header_and_coefficients(eigen2):
     assert clm.shape == slm.shape == (EIGEN2_LMAX + 1, EIGEN2_LMAX + 1)
     assert clm[0, 0] == 1.0
     assert clm[2, 0] == EIGEN2_C20
-    assert clm[2, 0] == pytest.approx(-4.8417e-4, abs=5e-9)
     assert clm[2, 2] == EIGEN2_C22
     assert slm[2, 2] == EIGEN2_S22
     # S_l0 is identically zero (sin(0 * lon) = 0); no coefficients above m = l
@@ -90,7 +113,7 @@ def test_read_icgem_no_max_degree_raises(tmp_path):
         "end_of_head ====\n"
         "gfc 0 0 0.1e+01 0.0e+00 0.0 0.0\n"
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="max_degree header must appear"):
         read_icgem_coeff(str(f))
 
 
@@ -105,7 +128,7 @@ def test_read_icgem_missing_radius_raises(tmp_path):
         "gfc 0 0 0.1e+01 0.0e+00 0.0 0.0\n"
         "gfc 2 0 -.484165815935e-03 0.0e+00 0.0 0.0\n"
     )
-    with pytest.raises(ValueError, match="missing required header"):
+    with pytest.raises(ValueError, match="missing required header fields"):
         read_icgem_coeff(str(f))
 
 
@@ -189,42 +212,57 @@ def test_scalar_matches_batch(eigen2):
 # ---------------------------------------------------------------------------
 # FO-07 GravPot
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(strict=True, reason="F7/R7: get_pot returns None before calc_pot")
-def test_gravpot_get_pot_before_calc_raises():
+@pytest.mark.xfail(
+    strict=True,
+    raises=pytest.fail.Exception,
+    reason="F7/R7: get_pot returns None before calc_pot",
+)
+def test_gravpot_get_pot_before_calc_raises(primed_cache):
     """FO-07: ``get_pot()`` before ``calc_pot()`` raises ValueError."""
     gp = GravPot(pot_file="EIGEN-2.gfc", lmax=2)
     with pytest.raises(ValueError):
         gp.get_pot()
 
 
-def test_gravpot_lmax_clamped_on_first_load():
+def test_gravpot_lmax_clamped_on_first_load(empty_cache):
     """FO-07: lmax above the file maximum is clamped to 140 when the file is read."""
-    config.state["pot_coef_loaded"] = False
-    config.state["pot_file"] = None
     gp = GravPot(pot_file="EIGEN-2.gfc", lmax=500)
     assert gp.lmax == EIGEN2_LMAX
     assert config.state["pot_coef_loaded"] is True
     assert config.state["pot_file"] == "EIGEN-2.gfc"
 
 
-@pytest.mark.xfail(strict=True, reason="F7/R7: lmax not clamped on cached path")
-def test_gravpot_lmax_clamped_on_cached_path():
+def test_gravpot_second_instance_uses_cache(empty_cache):
+    """FO-07: a second GravPot with the same file takes the config.state cache.
+
+    The first instance reads the file and fills the cache; the second must
+    reuse the very same coefficient arrays (identity, not a re-parse).
+    """
+    first = GravPot(pot_file="EIGEN-2.gfc", lmax=20)
+    second = GravPot(pot_file="EIGEN-2.gfc", lmax=500)
+    assert second.clm is first.clm
+    assert second.slm is first.slm
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="F7/R7: lmax not clamped on cached path",
+)
+def test_gravpot_lmax_clamped_on_cached_path(empty_cache):
     """FO-07: lmax is also clamped when coefficients come from config.state.
 
-    The first GravPot populates the cache; the second must take the cached
-    branch (checked via identity of ``clm``) and still clamp lmax to 140.
+    The first GravPot fills the cache; the second (cached branch, verified by
+    ``test_gravpot_second_instance_uses_cache``) must still clamp lmax to 140.
     ``calc_pot`` is not called: with lmax 500 the Numba kernel would index
     beyond the (141, 141) coefficient arrays without bounds checking.
     """
-    config.state["pot_coef_loaded"] = False
-    config.state["pot_file"] = None
-    first = GravPot(pot_file="EIGEN-2.gfc", lmax=20)
+    GravPot(pot_file="EIGEN-2.gfc", lmax=20)
     second = GravPot(pot_file="EIGEN-2.gfc", lmax=500)
-    assert second.clm is first.clm  # cached branch was taken
     assert second.lmax == EIGEN2_LMAX
 
 
-def test_gravpot_missing_file_raises(tmp_path):
+def test_gravpot_missing_file_raises(tmp_path, empty_cache):
     """FO-07: a potential file that exists nowhere -> ValueError."""
     with pytest.raises(ValueError, match="cannot be found"):
         GravPot(pot_file=str(tmp_path / "no_such_model.gfc"))
@@ -233,7 +271,7 @@ def test_gravpot_missing_file_raises(tmp_path):
 # ---------------------------------------------------------------------------
 # FO-08 EarthPotential
 # ---------------------------------------------------------------------------
-def test_earth_potential_dict_shapes(constellation_fixture):
+def test_earth_potential_dict_shapes(constellation_fixture, primed_cache):
     """FO-08: ``potential`` returns {id: (N,) float array} close to GM/r.
 
     Non-central terms are at most ~1e-3 of GM/r (J2 dominated), so the
@@ -252,7 +290,9 @@ def test_earth_potential_dict_shapes(constellation_fixture):
         np.testing.assert_allclose(u, EIGEN2_GM / r, rtol=2e-3)
 
 
-def test_earth_potential_acceleration_not_implemented(constellation_fixture):
+def test_earth_potential_acceleration_not_implemented(
+    constellation_fixture, primed_cache
+):
     """FO-08: ``acceleration`` raises NotImplementedError."""
     ep = EarthPotential(pot_file="EIGEN-2.gfc", lmax=20)
     with pytest.raises(NotImplementedError):
@@ -262,19 +302,33 @@ def test_earth_potential_acceleration_not_implemented(constellation_fixture):
 # ---------------------------------------------------------------------------
 # FO-13 EarthPotential vs Orekit
 # ---------------------------------------------------------------------------
-def test_earth_potential_matches_orekit(esa_constellation, orekit_ref_small):
+def test_earth_potential_matches_orekit(
+    esa_constellation, orekit_ref_small, primed_cache
+):
     """FO-13: EIGEN-2 lmax 100 on the ESA POD matches Orekit ``earth_gp``.
 
     Reference: Orekit potential stored in ``orekit_ref_small['earth_gp']``
     (m^2/s^2) for the same epochs (tests/data/make_fixtures.py). Notebooks
     showed agreement at ~1e-9 relative, but that was display rounding in
     km^2/s^2. Orekit (Orekit_EDR.ipynb: HolmesFeatherstoneAttractionModel,
-    EIGEN-2, degree/order 100) and CONTIGO agree to ~3e-16 relative (measured),
-    so besides the ``np.allclose`` default a rtol of 1e-12 is also asserted.
+    EIGEN-2, degree/order 100) and CONTIGO agree to ~2.6e-16 relative
+    (measured locally). The kernel ``_get_potential_numba_batch`` is compiled
+    with ``fastmath=True, parallel=True``, so the summation order (and the last
+    few bits) may differ across numba/LLVM versions and CPUs in the CI matrix;
+    rtol 1e-10 leaves room for that while staying five orders of magnitude
+    below the np.allclose default rtol (1e-5).
+
+    The epochs are first checked row for row: the constellation stores UTC,
+    and GPS = UTC + 18 s in 2018, which matches the reference stamps exactly.
     """
+    sc = esa_constellation.spacecraft["ESA"]
+    gps = pd.DatetimeIndex(sc.sc_utc).tz_localize(None) + pd.Timedelta(seconds=18)
+    np.testing.assert_array_equal(
+        gps.values, orekit_ref_small["DateTime"].to_numpy(dtype="datetime64[ns]")
+    )
+
     ep = EarthPotential(pot_file="EIGEN-2.gfc", lmax=100)
     u = ep.potential(esa_constellation)["ESA"]
     ref = orekit_ref_small["earth_gp"].to_numpy()
     assert u.shape == ref.shape
-    assert np.allclose(u, ref)
-    np.testing.assert_allclose(u, ref, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(u, ref, rtol=1e-10, atol=0)
