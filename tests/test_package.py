@@ -285,7 +285,7 @@ def _notebook_index() -> dict[str, Path]:
     """Map notebook file name to path, walking the repo once.
 
     When a name occurs twice the copy under a ``tutorials`` folder wins, then
-    the shallowest. Surviving the later move to ``notebooks/tutorials``.
+    the shallowest, so the tutorials in ``notebooks/tutorials`` are preferred.
     """
     found: dict[str, list[Path]] = {}
     for root, dirs, files in os.walk(REPO):
@@ -791,26 +791,12 @@ def test_name_resolves_through_star_import_one_level(monkeypatch):
 # ---------------------------------------------------------------------------
 # Orekit_EDR.ipynb is not listed: it only uses the raw Orekit API and has no
 # ``contigo`` import, so there is nothing to resolve. Add it back if it gains any.
-@pytest.mark.parametrize(
-    "notebook",
-    [
-        pytest.param(
-            "CONTIGO_Colab.ipynb",
-            marks=pytest.mark.xfail(
-                strict=True,
-                raises=AssertionError,
-                reason="F9/N2: CONTIGO_Colab imports removed names",
-            ),
-        ),
-        "Tutorial_Overview.ipynb",
-    ],
-)
+@pytest.mark.parametrize("notebook", ["CONTIGO_Colab.ipynb", "Tutorial_Overview.ipynb"])
 def test_nb01_notebook_imports_resolve(notebook):
     """NB-01: every contigo import in the tutorial notebook resolves.
 
     Static check only (ast on the notebook cells and on the contigo sources).
-    Expected: no unresolved module or name. ``CONTIGO_Colab`` imports
-    ``ThirdBody`` from ``third_body_acc``, which no longer exists (F9/N2).
+    Expected: no unresolved module or name (``CONTIGO_Colab`` was fixed by N2).
     """
     path = _find_notebook(notebook)
     if path is None:
