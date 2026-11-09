@@ -2,15 +2,14 @@
 
 added: 30/03/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 from scipy.integrate import cumulative_simpson
 
 import contigo.contigo_utils.constants as constants
-
-from contigo.forces.base import ForceModel
 from contigo.constellation import Constellation
+from contigo.forces.base import ForceModel
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
 
@@ -32,11 +31,13 @@ class EDRDensity:
         - Gravitational potential
     """
 
-    def __init__(self,
-                 constellation: Constellation,
-                 solarsys_env: SolarSystemEnvironment,
-                 force_models: list[ForceModel],
-                 potential_model: ForceModel,):
+    def __init__(
+        self,
+        constellation: Constellation,
+        solarsys_env: SolarSystemEnvironment,
+        force_models: list[ForceModel],
+        potential_model: ForceModel,
+    ):
         """Initialize the EDRDensity calculator.
 
         Parameters
@@ -45,8 +46,8 @@ class EDRDensity:
             Constellation container with the spacecraft state, physical properties,
             spacecraft IDs, and time arrays.
         solarsys_env : SolarSystemEnvironment
-            Solar System Environment container to load the ephemeris of solar system 
-            bodies. The ephemeris is loaded for the derivation of the third body 
+            Solar System Environment container to load the ephemeris of solar system
+            bodies. The ephemeris is loaded for the derivation of the third body
             accelerations.
         force_models : list[ForceModel]
             List of ForceModel implementations to compute accelerations
@@ -62,22 +63,25 @@ class EDRDensity:
         unique_gps, u_id = np.unique(constellation.sspice_gps, return_index=True)
 
         # load ephemeris for all unique times
-        self.solarsys_env._load_times(ephem_time=constellation.sspice_et[u_id],
-                                      gps_time=unique_gps,
-                                      utc_time=constellation.sc_utc[u_id])
+        self.solarsys_env._load_times(
+            ephem_time=constellation.sspice_et[u_id],
+            gps_time=unique_gps,
+            utc_time=constellation.sc_utc[u_id],
+        )
 
-
-    def compute_den(self,
-                    window: pd.Timedelta=pd.Timedelta(minutes=90),
-                    smth_edr: int=10,
-                    smth_den: int | None = None,) -> dict:
-        """Derive the effective density, equation 5 and A16 of 
+    def compute_den(
+        self,
+        window: pd.Timedelta = pd.Timedelta(minutes=90),
+        smth_edr: int = 10,
+        smth_den: int | None = None,
+    ) -> dict:
+        """Derive the effective density, equation 5 and A16 of
         https://doi.org/10.1029/2024EA003898, from the EDR and the denominator.
 
         Parameters
         ----------
         window : pd.Timedelta, optional
-            The size of the window used for deriving the deltas of the EDR and 
+            The size of the window used for deriving the deltas of the EDR and
             denominator, by default pd.Timedelta(minutes=90)
         smth_edr : int, optional
             The number of points to smooth edr returned by compute_edr(), by default 10
@@ -101,7 +105,7 @@ class EDRDensity:
             match.
         """
 
-        # create dictionary for effective density results 
+        # create dictionary for effective density results
         self.efd = {}
         # compute edr and denominator from A18 and A19 of
         # https://doi.org/10.1029/2024EA003898
@@ -115,18 +119,24 @@ class EDRDensity:
         den_k = self.denom.keys()
 
         if set(edr_k) != set(den_k):
-            raise ValueError('EDR and denominator keys do not match')
-        
+            raise ValueError("EDR and denominator keys do not match")
+
         for sc_id in edr_k:
             edr = self.edr[sc_id]
             denom = self.denom[sc_id]
 
             if edr.shape != denom.shape:
-                raise ValueError(f'EDR and denominator shapes do ' \
-                'not match for sc_id {sc_id}')
-            
+                raise ValueError(
+                    "EDR and denominator shapes do " "not match for sc_id {sc_id}"
+                )
+
             # smooth the edr
-            edr_sm = pd.Series(edr).rolling(smth_edr, min_periods=1, center=True).mean().to_numpy() 
+            edr_sm = (
+                pd.Series(edr)
+                .rolling(smth_edr, min_periods=1, center=True)
+                .mean()
+                .to_numpy()
+            )
 
             sc_utc = self.constellation[sc_id].sc_utc
             id0_list, id1_list = [], []
@@ -135,8 +145,8 @@ class EDRDensity:
             e = s + window
 
             while e <= sc_utc[-1]:
-                i0 = np.searchsorted(sc_utc, s, side='left')
-                i1 = np.searchsorted(sc_utc, e, side='left') - 1
+                i0 = np.searchsorted(sc_utc, s, side="left")
+                i1 = np.searchsorted(sc_utc, e, side="left") - 1
                 id0_list.append(i0)
                 id1_list.append(i1)
                 s += window
@@ -148,22 +158,29 @@ class EDRDensity:
             delta_edr = edr_sm[id1] - edr_sm[id0]
             delta_den = denom[id1] - denom[id0]
 
-            efd_sat = -2*delta_edr/delta_den
-            efd_t = self.constellation[sc_id].sc_utc[id0] + \
-                    (self.constellation[sc_id].sc_utc[id1] - \
-                    self.constellation[sc_id].sc_utc[id0])/2.
+            efd_sat = -2 * delta_edr / delta_den
+            efd_t = (
+                self.constellation[sc_id].sc_utc[id0]
+                + (
+                    self.constellation[sc_id].sc_utc[id1]
+                    - self.constellation[sc_id].sc_utc[id0]
+                )
+                / 2.0
+            )
 
             if smth_den is not None:
-                efd_sat = pd.Series(efd_sat).rolling(smth_den, min_periods=1, 
-                                                     center=True).mean().to_numpy()
-            
-            efd_df = pd.DataFrame({'DateTime':efd_t, 'efd':efd_sat})
+                efd_sat = (
+                    pd.Series(efd_sat)
+                    .rolling(smth_den, min_periods=1, center=True)
+                    .mean()
+                    .to_numpy()
+                )
+
+            efd_df = pd.DataFrame({"DateTime": efd_t, "efd": efd_sat})
 
             self.efd[sc_id] = efd_df
 
-
         return self.efd
-        
 
     def compute_edr(self) -> dict:
         """
@@ -187,7 +204,7 @@ class EDRDensity:
 
         earth_angv2 = constants.WGS84_EARTH_ANGULAR_VELOCITY**2
 
-        # derive the earth potential for each sc in the 
+        # derive the earth potential for each sc in the
         # constellation
         e_gp_con = self.potential_model.potential(self.constellation)
 
@@ -195,54 +212,58 @@ class EDRDensity:
 
         # derive the accelerations from the force models
         # for the constellation
-        acc_con = { }
+        acc_con = {}
         for model in self.force_models:
-            acc_con[model.name] = model.acceleration(self.constellation, self.solarsys_env)
+            acc_con[model.name] = model.acceleration(
+                self.constellation, self.solarsys_env
+            )
 
         self.accelerations = acc_con
 
         for sc_id, sc in spacecraft_dict.items():
             N = sc.N
-            
+
             sc_p = sc.state_ecef[:, 0:3]
             sc_v = sc.state_ecef[:, 3:]
 
-            sc_xy2 = sc_p[:,0]**2 + sc_p[:,1]**2
-            sc_v2 = (sc_v*sc_v).sum(axis=1)
+            sc_xy2 = sc_p[:, 0] ** 2 + sc_p[:, 1] ** 2
+            sc_v2 = (sc_v * sc_v).sum(axis=1)
 
             e_gp = e_gp_con[sc_id]
 
             # equation a18 and a19 non integral portion
             # here we use r^2*cos*2(phi) = x^2+y^2
             # and we subtract the edr at edr time zero
-            edr = sc_v2/2. - e_gp - earth_angv2*sc_xy2/2.
+            edr = sc_v2 / 2.0 - e_gp - earth_angv2 * sc_xy2 / 2.0
 
             # compute the acceleration integrals
             # x-axis for integrating
             acc_int = np.zeros(N)
             x_ax = sc.sspice_gps
-            x_ax = x_ax-x_ax.min()
+            x_ax = x_ax - x_ax.min()
             for m_acc in acc_con.values():
                 # if the force model returns multiple accelerations (B,N,3)
                 # loop through each body
                 if m_acc[sc_id].ndim == 3:
                     for i in range(m_acc[sc_id].shape[0]):
-                        acc = m_acc[sc_id][i,:,:]
+                        acc = m_acc[sc_id][i, :, :]
                         if acc.shape[0] != N:
-                            raise ValueError('Model accelerations should be shape (N,3) or (x,N,3)')
-                        a_int = (acc*sc_v).sum(axis=1)
+                            raise ValueError(
+                                "Model accelerations should be shape (N,3) or (x,N,3)"
+                            )
+                        a_int = (acc * sc_v).sum(axis=1)
                         acc_int += cumulative_simpson(a_int, x=x_ax, initial=0)
                 else:
-                    a_int = (m_acc[sc_id]*sc_v).sum(axis=1)
+                    a_int = (m_acc[sc_id] * sc_v).sum(axis=1)
                     acc_int += cumulative_simpson(a_int, x=x_ax, initial=0)
 
             edr = edr - acc_int
-            edr = edr - edr[0] 
+            edr = edr - edr[0]
 
             results[sc_id] = edr
 
         return results
-    
+
     def compute_denom(self) -> dict:
         """
         Compute denomenator of equation A20 of
@@ -258,17 +279,17 @@ class EDRDensity:
         denom = {}
 
         for sc_id, sc in spacecraft_dict.items():
-            
-            b=sc.cd_arr*sc.drag_area_arr/sc.sc_mass_arr
-            
+
+            b = sc.cd_arr * sc.drag_area_arr / sc.sc_mass_arr
+
             sc_v = sc.state_ecef[:, 3:]
-            sc_v3 = np.linalg.norm(sc_v,axis=1)**3
+            sc_v3 = np.linalg.norm(sc_v, axis=1) ** 3
 
             x_ax = sc.sspice_gps
-            x_ax = x_ax-x_ax.min()
+            x_ax = x_ax - x_ax.min()
 
-            y_int = b*sc_v3
+            y_int = b * sc_v3
 
-            denom[sc_id] = cumulative_simpson(y_int,x=x_ax,initial=0)
+            denom[sc_id] = cumulative_simpson(y_int, x=x_ax, initial=0)
 
         return denom

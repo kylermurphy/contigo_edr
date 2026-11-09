@@ -2,10 +2,13 @@
 
 added: 26/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
+
 from typing import Sequence
+
 import numpy as np
 
 from .spacecraft import Spacecraft
+
 
 # ==================================================================
 # Constellation Container
@@ -20,10 +23,12 @@ class Constellation:
     spacecraft is a strict single-ID Spacecraft object.
     """
 
-    def __init__(self,
-                 spacecraft: Spacecraft | Sequence[Spacecraft] | None = None,
-                 **spacecraft_kwargs) -> None:
-        
+    def __init__(
+        self,
+        spacecraft: Spacecraft | Sequence[Spacecraft] | None = None,
+        **spacecraft_kwargs,
+    ) -> None:
+
         # -----------------------------------------------------------
         # Case 1: List of Spacecraft → convert via iterative addition
         # -----------------------------------------------------------
@@ -65,10 +70,7 @@ class Constellation:
             # Load once using the Spacecraft loader
             multi_sc = Spacecraft(**spacecraft_kwargs)
         else:
-            raise TypeError(
-                "spacecraft must be Spacecraft, list[Spacecraft], or None"
-            )
-
+            raise TypeError("spacecraft must be Spacecraft, list[Spacecraft], or None")
 
         # Split into individual spacecraft
         self.spacecraft: dict = multi_sc.split_by_id()
@@ -107,18 +109,18 @@ class Constellation:
 
     def __repr__(self) -> str:
         return f"Constellation(n_spacecraft={len(self)}, ids={self.ids})"
-    
+
     def __add__(self, other: "Constellation") -> "Constellation":
         if not isinstance(other, Constellation):
             return NotImplemented
-        
+
         # Prevent duplicate spacecraft IDs
         overlap = set(self.ids).intersection(other.ids)
         if overlap:
             raise ValueError(
                 f"Cannot merge constellations. Duplicate spacecraft IDs found: {overlap}"
             )
-        
+
         merged_dict = self.spacecraft | other.spacecraft
         merged_et = self._merge_time_array(self.sspice_et, other.sspice_et)
         merged_gps = self._merge_time_array(self.sspice_gps, other.sspice_gps)
@@ -128,8 +130,9 @@ class Constellation:
             spacecraft_dict=merged_dict,
             sspice_et=merged_et,
             sspice_gps=merged_gps,
-            sc_utc=merged_utc)
-    
+            sc_utc=merged_utc,
+        )
+
     def __iadd__(self, other: "Constellation") -> "Constellation":
         if not isinstance(other, Constellation):
             return NotImplemented

@@ -2,15 +2,18 @@
 
 added: 18/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
+
 import logging
 from operator import itemgetter
+
 import numpy as np
 import numpy.typing as npt
 
-from contigo.ephemeris.base import EphemerisProvider
 from contigo.contigo_utils.constants import GMc
+from contigo.ephemeris.base import EphemerisProvider
 
 logger = logging.getLogger(__name__)
+
 
 class SolarSystemEnvironment:
     """
@@ -49,13 +52,13 @@ class SolarSystemEnvironment:
 
         if self._check_times(ephem_time, gps_time, utc_time):
             ephem_time = np.asarray(ephem_time, dtype=float)
-            gps_time = np.asarray(gps_time,dtype=float)
+            gps_time = np.asarray(gps_time, dtype=float)
             utc_time = np.asarray(utc_time)
-            self._load_times(ephem_time,gps_time,utc_time)
+            self._load_times(ephem_time, gps_time, utc_time)
 
         eph = provider.ephemeris[0:5]
 
-        self.GM = np.array([GMc[eph][bd] for bd in self.bodies],dtype=float)
+        self.GM = np.array([GMc[eph][bd] for bd in self.bodies], dtype=float)
 
     # ----------------------------------------------------------
     # Public API
@@ -93,7 +96,7 @@ class SolarSystemEnvironment:
         Uses time quantization to reduce redundant ephemeris lookups.
         """
         sp_et = np.asarray(ephem_time, dtype=float)
-        sp_gps = np.asarray(gps_time,dtype=float)
+        sp_gps = np.asarray(gps_time, dtype=float)
         sp_utc = np.asarray(utc_time)
 
         # Ensure all times are loaded
@@ -111,7 +114,9 @@ class SolarSystemEnvironment:
     # Internal
     # ----------------------------------------------------------
 
-    def _quantize(self, t: npt.NDArray[np.float64]) -> npt.NDArray[np.int_ | np.float64]:
+    def _quantize(
+        self, t: npt.NDArray[np.float64]
+    ) -> npt.NDArray[np.int_ | np.float64]:
         """Quantize time using tolerance and return integer bin."""
         if self.tolerance == 0.0:
             # exact integer seconds binning
@@ -120,10 +125,9 @@ class SolarSystemEnvironment:
             return t
         return np.round(t / self.tolerance).astype(np.int64)
 
-    def _load_times(self, 
-                    ephem_time: np.ndarray,
-                    gps_time: np.ndarray,
-                    utc_time: np.ndarray) -> None:
+    def _load_times(
+        self, ephem_time: np.ndarray, gps_time: np.ndarray, utc_time: np.ndarray
+    ) -> None:
         """
         Load only times not already cached.
         """
@@ -133,22 +137,27 @@ class SolarSystemEnvironment:
 
         # Identify which quantized times are missing
         missing = [
-                   [i,et,utc,gps]
-                   for i, et, utc, gps in zip(q_times,ephem_time,utc_time,gps_time) 
-                   if i not in self._cache
-                   ]
+            [i, et, utc, gps]
+            for i, et, utc, gps in zip(
+                q_times, ephem_time, utc_time, gps_time, strict=True
+            )
+            if i not in self._cache
+        ]
 
         if not missing:
             return
 
-        missing_qt, missing_et, missing_utc, missing_gps = list(zip(*missing))
+        missing_qt, missing_et, missing_utc, missing_gps = list(
+            zip(*missing, strict=True)
+        )
 
         # Call provider once for all missing times
-        r_new = self._provider(self.bodies,
-                               ephem_time=missing_et,
-                               gps_time=missing_gps,
-                               utc_time=missing_utc)
-
+        r_new = self._provider(
+            self.bodies,
+            ephem_time=missing_et,
+            gps_time=missing_gps,
+            utc_time=missing_utc,
+        )
 
         # Store per-time slice in dictionary
         for i, t in enumerate(missing_qt):

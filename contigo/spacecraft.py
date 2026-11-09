@@ -4,20 +4,19 @@ physical properties, and IDs.
 added: 18/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
+import glob
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
-import os
-import glob
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-
 import spiceypy as spice
 
-from contigo.contigo_utils import time_utils
-from contigo.contigo_utils import utils
+from contigo.contigo_utils import time_utils, utils
+
 
 @dataclass
 class Spacecraft:
@@ -37,11 +36,11 @@ class Spacecraft:
     # ------------------------------------------------------------------
     # Raw user inputs (flexible)
     # ------------------------------------------------------------------
-    state: npt.ArrayLike | None = None        # (N,6) [x,y,z,vx,vy,vz]
-    time: npt.ArrayLike | None = None         # (N,)
+    state: npt.ArrayLike | None = None  # (N,6) [x,y,z,vx,vy,vz]
+    time: npt.ArrayLike | None = None  # (N,)
     sc_id_input: npt.ArrayLike | None = None  # (N,)
-    tscale_input: str | None = None           # ['GPS','TAI','UTC','ET','TDB']
-    unit_input: str = 'm'                     # ['m', 'km']
+    tscale_input: str | None = None  # ['GPS','TAI','UTC','ET','TDB']
+    unit_input: str = "m"  # ['m', 'km']
 
     # Spacecraft physical properties (scalar or (N,))
     cd: float | npt.ArrayLike | None = None
@@ -77,12 +76,12 @@ class Spacecraft:
     # Internal normalized state (strict, always SI: m and m/s)
     # ------------------------------------------------------------------
     state_ecef: npt.NDArray[np.float64] = field(init=False)  # (N,6)
-    stime: pd.DatetimeIndex = field(init=False)              # (N,)
-    sspice_et: npt.NDArray[np.float64] = field(init=False)   # (N,)
+    stime: pd.DatetimeIndex = field(init=False)  # (N,)
+    sspice_et: npt.NDArray[np.float64] = field(init=False)  # (N,)
     sspice_gps: npt.NDArray[np.float64] = field(init=False)  # (N,)
     sc_utc: npt.NDArray = field(init=False)  # (N,)
-    tscale: str = field(init=False)                          # validated time scale
-    sc_id: npt.NDArray = field(init=False)                   # (N,)
+    tscale: str = field(init=False)  # validated time scale
+    sc_id: npt.NDArray = field(init=False)  # (N,)
     unique_ids: npt.NDArray = field(init=False)
 
     # Normalized spacecraft properties (always (N,))
@@ -98,11 +97,11 @@ class Spacecraft:
         Based on input load data from arrays or files.
 
         Raises:
-            ValueError: if arrays are provide both a spacecraft state array and 
-            time array must passed. 
-            ValueError: either (state, time) arrays must be passed or a container of 
+            ValueError: if arrays are provide both a spacecraft state array and
+            time array must passed.
+            ValueError: either (state, time) arrays must be passed or a container of
             files.
-        """        
+        """
         self._validate_timescale()
         self.unit = self.unit_input.lower()
 
@@ -114,16 +113,18 @@ class Spacecraft:
             if self.state_file is None:
                 raise ValueError("Either (state, time) or state_file must be provided")
             self.load_from_file(self.state_file)
-        
+
         # normalize time
         self._normalize_time()
         # normalize units
         self._normalize_units()
 
-    def load_from_arrays(self, state: 
-                         npt.ArrayLike,
-                         time: npt.ArrayLike,
-                         sc_id: npt.ArrayLike | None = None,) -> None:
+    def load_from_arrays(
+        self,
+        state: npt.ArrayLike,
+        time: npt.ArrayLike,
+        sc_id: npt.ArrayLike | None = None,
+    ) -> None:
         """Load spacecraft state from arrays passed in creation.
 
         Parameters
@@ -145,7 +146,7 @@ class Spacecraft:
             sc_id must be 1D and same length as time.
         """
         # clear any cached data
-        self._clear_cache() 
+        self._clear_cache()
 
         s = np.asarray(state, dtype=float)
         if s.ndim != 2 or s.shape[1] != 6:
@@ -162,9 +163,11 @@ class Spacecraft:
                 raise ValueError("sc_id must be 1D and same length as time")
             sc_id_arr = pd.Series(sc).astype("category").to_numpy()
         else:
-            sc_id_arr = pd.Series(
-                np.full(len(t), "NO_ID", dtype=object)
-            ).astype("category").to_numpy()
+            sc_id_arr = (
+                pd.Series(np.full(len(t), "NO_ID", dtype=object))
+                .astype("category")
+                .to_numpy()
+            )
 
         # Commit normalized state
         self.state_ecef = s
@@ -178,10 +181,12 @@ class Spacecraft:
     # ------------------------------------------------------------------
     # Loader / normalizer (file-based)
     # ------------------------------------------------------------------
-    def load_from_file(self,
-                       state_file: str | Path | Iterable[str | Path],
-                       loader: str | None = None,
-                       read_kwargs: dict | None = None,) -> None:
+    def load_from_file(
+        self,
+        state_file: str | Path | Iterable[str | Path],
+        loader: str | None = None,
+        read_kwargs: dict | None = None,
+    ) -> None:
         """Load spacecraft state from one or more files.
 
         Parameters
@@ -206,26 +211,30 @@ class Spacecraft:
             Time and state must have equal length.
         """
         # clear any cached data
-        self._clear_cache()    
+        self._clear_cache()
 
         files = self._expand_files(state_file)
         frames: list[pd.DataFrame] = []
 
         for file in files:
             df = self._load_table(file, loader, read_kwargs)
-            if self.sc_id_col is not None and self.sc_id_col.lower() == 'filename':
+            if self.sc_id_col is not None and self.sc_id_col.lower() == "filename":
                 base_file = os.path.basename(file)
                 if isinstance(self.sc_fn_slc, slice):
                     base_file = base_file[self.sc_fn_slc]
-                df['filename'] = base_file
+                df["filename"] = base_file
             frames.append(df)
 
         df_all = pd.concat(frames, ignore_index=True)
 
         required = {
             self.time_col,
-            self.x_col, self.y_col, self.z_col,
-            self.vx_col, self.vy_col, self.vz_col,
+            self.x_col,
+            self.y_col,
+            self.z_col,
+            self.vx_col,
+            self.vy_col,
+            self.vz_col,
         }
 
         missing = required - set(df_all.columns)
@@ -236,10 +245,16 @@ class Spacecraft:
         t = pd.to_datetime(df_all[self.time_col].to_numpy(), utc=False)
 
         # Normalize state vector
-        s = df_all[[
-            self.x_col, self.y_col, self.z_col,
-            self.vx_col, self.vy_col, self.vz_col,
-        ]].to_numpy(dtype=float)
+        s = df_all[
+            [
+                self.x_col,
+                self.y_col,
+                self.z_col,
+                self.vx_col,
+                self.vy_col,
+                self.vz_col,
+            ]
+        ].to_numpy(dtype=float)
 
         if s.ndim != 2 or s.shape[1] != 6:
             raise ValueError("State data must have shape (N,6)")
@@ -250,11 +265,17 @@ class Spacecraft:
         if self.sc_id_col is not None and self.sc_id_col in df_all.columns:
             sc_id_arr = df_all[self.sc_id_col].astype("category").to_numpy()
         elif self.sc_id_input is not None:
-            sc_id_arr = pd.Series(
-                np.full(len(t), self.sc_id_input, dtype=object)).astype("category").to_numpy()
+            sc_id_arr = (
+                pd.Series(np.full(len(t), self.sc_id_input, dtype=object))
+                .astype("category")
+                .to_numpy()
+            )
         else:
-            sc_id_arr = pd.Series(
-                np.full(len(t), "NO_ID", dtype=object)).astype("category").to_numpy()
+            sc_id_arr = (
+                pd.Series(np.full(len(t), "NO_ID", dtype=object))
+                .astype("category")
+                .to_numpy()
+            )
 
         # Commit normalized state
         self.state_ecef = s
@@ -270,14 +291,14 @@ class Spacecraft:
     # ------------------------------------------------------------------
     def _validate_timescale(self) -> None:
         """Validate the time scale
-        
+
         Time is required to have an attached scale so that the Spacecraft
         class can work with spiceypy
 
         Raises:
             ValueError: the time scale must be one of 'GPS', 'TAI', 'UTC', 'ET', 'TDB'
-        """        
-        allowed = {'GPS', 'TAI', 'UTC', 'ET', 'TDB'}
+        """
+        allowed = {"GPS", "TAI", "UTC", "ET", "TDB"}
         if self.tscale_input is None:
             raise ValueError("Time scale of the spacecraft, tscale_input, must be set")
         else:
@@ -321,11 +342,11 @@ class Spacecraft:
             pass
         else:
             raise ValueError(f"Unsupported unit: {self.unit}")
-        
+
     def _normalize_time(self):
 
-        self.sspice_et = time_utils.spice_time(self.stime,self.tscale, 'ET')
-        self.sspice_gps = time_utils.spice_time(self.stime,self.tscale, 'GPS')
+        self.sspice_et = time_utils.spice_time(self.stime, self.tscale, "ET")
+        self.sspice_gps = time_utils.spice_time(self.stime, self.tscale, "GPS")
         self.sc_utc = spice.et2datetime(self.sspice_et)
 
     def _is_sorted_asc(self, arr):
@@ -335,8 +356,10 @@ class Spacecraft:
         # Check if all differences between consecutive elements are >= 0
         return (np.diff(arr) >= 0).all()
 
-    def _expand_files(self,
-                      state_file: str | Path | Iterable[str | Path],) -> list[Path]:
+    def _expand_files(
+        self,
+        state_file: str | Path | Iterable[str | Path],
+    ) -> list[Path]:
         """Expand wildcards and iterables into a sorted list of files.
 
         Args:
@@ -347,7 +370,7 @@ class Spacecraft:
 
         Returns:
             list[Path]: List of paths to load.
-        """        
+        """
         if isinstance(state_file, (str, Path)):
             paths = glob.glob(str(state_file))
         else:
@@ -361,33 +384,44 @@ class Spacecraft:
 
         return sorted(files)
 
-    def _load_table(self,
-                    file: Path,
-                    loader: str | None = None,
-                    read_kwargs: dict | None = None,) -> pd.DataFrame:
+    def _load_table(
+        self,
+        file: Path,
+        loader: str | None = None,
+        read_kwargs: dict | None = None,
+    ) -> pd.DataFrame:
         """Load file into a pandas DataFrame
 
         Args:
             file (Path): File to load.
             loader (str | None, optional): Loader to use, csv, hdf, or sp3. Defaults to None
             and uses file extension to infer which to use.
-            read_kwargs (dict | None, optional): Keyword argument to pass to the loader 
+            read_kwargs (dict | None, optional): Keyword argument to pass to the loader
             functions. Defaults to None.
 
-        Raises: 
+        Raises:
             ValueError: Raise error if loader or file extension can't be identified.
 
         Returns:
             pd.DataFrame: DataFrame containing Spacecraft data loaded from passed files.
-        """        
+        """
         """Dispatch to the appropriate reader based on loader or file extension."""
         suffix = file.suffix.lower()
         loader = loader or suffix.lstrip(".")
         kwargs = read_kwargs or {}
 
         base_txt = {"csv", "txt", "text"}
-        zip_txt = {"gz", "bz2", "zip", "xz", "zst",
-                   "tar", "tar.gz", "tar.xz", "tar.bz2"}
+        zip_txt = {
+            "gz",
+            "bz2",
+            "zip",
+            "xz",
+            "zst",
+            "tar",
+            "tar.gz",
+            "tar.xz",
+            "tar.bz2",
+        }
 
         if loader in (base_txt | zip_txt):
             return pd.read_csv(file, **kwargs)
@@ -412,11 +446,11 @@ class Spacecraft:
         spacecraft_dict = {}
 
         for uid in self.unique_ids:
-            
-            # Find the indexes that match 
+
+            # Find the indexes that match
             # the spacecraft it uid
             # check if they're sorted
-            # if not sort 
+            # if not sort
             # sorting is done here as it reduces
             # the amount of sorting we need to do
             idx = np.where(self.sc_id == uid)[0]
@@ -429,7 +463,7 @@ class Spacecraft:
                 time=self.stime[idx],
                 sc_id_input=np.full(idx.shape[0], uid),
                 tscale_input=self.tscale,
-                unit_input='m',
+                unit_input="m",
                 cd=self.cd_arr[idx],
                 drag_area=self.drag_area_arr[idx],
                 sc_mass=self.sc_mass_arr[idx],
@@ -497,19 +531,21 @@ class Spacecraft:
                 srp_area=self.srp_area_arr,
             )
         return self._state_data_cache
-    
+
     def _clear_cache(self) -> None:
         """Clear cached derived/grouped state containers."""
         if hasattr(self, "_state_data_cache"):
             del self._state_data_cache
 
     def spherical(self) -> npt.NDArray[np.float64]:
-        r = np.linalg.norm(self.state_ecef[:,0:3], axis=1)
-        lat = np.arctan2(self.state_ecef[:,2],
-                         np.linalg.norm(self.state_ecef[:,0:2], axis=1))
-        lon = np.arctan2(self.state_ecef[:,1],self.state_ecef[:,0])
+        r = np.linalg.norm(self.state_ecef[:, 0:3], axis=1)
+        lat = np.arctan2(
+            self.state_ecef[:, 2], np.linalg.norm(self.state_ecef[:, 0:2], axis=1)
+        )
+        lon = np.arctan2(self.state_ecef[:, 1], self.state_ecef[:, 0])
 
-        return np.array([r,lat,lon]).transpose()
+        return np.array([r, lat, lon]).transpose()
+
     # ------------------------------------------------------------------
     # Convenience properties
     # ------------------------------------------------------------------
@@ -519,18 +555,17 @@ class Spacecraft:
 
         Returns:
             int: Number of elements in Spacecraft state/time
-        """        
+        """
         return self.state_ecef.shape[0]
-    
+
     @property
     def n_unique_ids(self) -> int:
         """Number of unique Spacecraft loaded
 
         Returns:
             int: Number of unique Spacecraft loaded
-        """        
+        """
         return len(list(self.unique_ids))
 
     def __repr__(self) -> str:
         return f"Spacecraft(N={self.N}, n_unique_ids={self.n_unique_ids})"
-
