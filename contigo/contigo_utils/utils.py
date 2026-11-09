@@ -31,7 +31,7 @@ def _require_online(url):
         raise config.OfflineError(f"CONTIGO_OFFLINE is set; refusing to download {url}")
 
 
-def dl_file(url, filename):
+def dl_file(url, filename, timeout=(10, 60)):
     """
     Download file from url to filename
 
@@ -39,6 +39,15 @@ def dl_file(url, filename):
     ----------
     url : url to file.
     filename : filename to save as.
+    timeout : (connect, read) timeout in seconds passed to ``requests``, so a
+        stalled connection raises instead of hanging.
+
+    Returns
+    -------
+    int
+        The expected size in bytes from ``Content-Length``, or 0 if the server
+        sent none or the body is content-encoded (then the size on disk can
+        differ from the header).
 
     Raises
     ------
@@ -51,7 +60,7 @@ def dl_file(url, filename):
 
     """
     _require_online(url)
-    r = requests.get(url, stream=True, allow_redirects=True)
+    r = requests.get(url, stream=True, allow_redirects=True, timeout=timeout)
     if r.status_code != 200:
         r.raise_for_status()  # Will only raise for 4xx codes, so...
         raise RuntimeError(f"Request to {url} returned status code {r.status_code}")
@@ -59,7 +68,7 @@ def dl_file(url, filename):
 
     # if requests couldn't get file size drop encoding to get it
     if file_size == 0:
-        rs = requests.head(url, headers={"Accept-Encoding": None})
+        rs = requests.head(url, headers={"Accept-Encoding": None}, timeout=timeout)
         file_size = int(rs.headers.get("Content-Length", 0))
 
     fpath = pathlib.Path(filename).expanduser().resolve()
@@ -75,6 +84,9 @@ def dl_file(url, filename):
     ) as r_raw:
         with fpath.open("wb") as f:
             shutil.copyfileobj(r_raw, f)
+
+    encoding = str(r.headers.get("Content-Encoding", "identity")).lower()
+    return file_size if encoding in ("", "identity") else 0
 
 
 def wf_mtime(url):
