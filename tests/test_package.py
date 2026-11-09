@@ -1,7 +1,7 @@
 """Package-level checks: import side effects and tutorial notebook imports.
 
 PK-01  importing contigo modules must not start the JVM (fresh subprocess).
-PK-01b/c  static check of the two modules that still start it at import.
+PK-01b/c  static check of the two modules that started it at import (R3).
 NB-01  every ``from contigo... import X`` in the tutorial notebooks resolves,
        checked by parsing sources only: no contigo module is executed (only
        the lightweight package ``__init__`` files are, through ``find_spec``).
@@ -32,12 +32,10 @@ import contigo
 REPO = Path(__file__).resolve().parents[1]
 TESTS_DIR = Path(__file__).resolve().parent
 
-#: Modules that start the JVM when imported today. They are never imported
-#: here (that would start Java and contact GitLab); they are checked with ast.
-JVM_AT_IMPORT = {
-    "contigo.forces.srp_orekit": "F4/R3",
-    "contigo.contigo_utils.jb08_utils": "same pattern as F4/R3",
-}
+#: Modules that start the JVM when imported. Empty since R3 moved the JVM
+#: start in ``srp_orekit`` and ``jb08_utils`` to first use; it must stay empty.
+#: Any module listed here is skipped by PK-01 (importing it would start Java).
+JVM_AT_IMPORT: dict[str, str] = {}
 
 PRUNE_DIRS = {
     ".git",
@@ -240,11 +238,13 @@ def test_pk01_scanner_distinguishes_import_time_from_deferred():
 
 
 def test_pk01_jvm_modules_are_still_the_known_ones():
-    """PK-01 guard: only the modules in ``JVM_AT_IMPORT`` use the JVM at import.
+    """PK-01 guard: no module starts the JVM or imports Java at import time.
 
-    A new module that starts the JVM at import must be fixed, not added to the
-    list; the list may only shrink.
+    Since R3 ``JVM_AT_IMPORT`` is empty, so every module must pass the static
+    scan. A new module that starts the JVM at import must be fixed, not added
+    to the list.
     """
+    assert JVM_AT_IMPORT == {}
     offenders = {
         name
         for name in _all_modules()
@@ -255,33 +255,23 @@ def test_pk01_jvm_modules_are_still_the_known_ones():
     ), f"new import-time JVM use: {sorted(offenders - set(JVM_AT_IMPORT))}"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="F4/R3: srp_orekit starts the JVM at import",
-)
 def test_pk01b_srp_orekit_does_not_start_jvm_at_import():
     """PK-01b: ``forces.srp_orekit`` must not start the JVM when imported.
 
     Checked statically (importing it would start Java and query GitLab).
     Expected after R3: no module-level ``start_orekit`` call or ``org.*``
-    import. Today both are present (lines 15-20).
+    import (both moved into ``SRPOrekitCB.__init__``).
     """
     path = _module_source_path("contigo.forces.srp_orekit")
     assert import_time_jvm_use(path.read_text(encoding="utf-8")) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="same pattern as F4/R3: jb08_utils starts the JVM at import",
-)
 def test_pk01c_jb08_utils_does_not_start_jvm_at_import():
     """PK-01c: ``contigo_utils.jb08_utils`` must not start the JVM when imported.
 
-    New finding in the PK-01 sweep: it repeats the ``srp_orekit`` pattern
-    (module-level ``start_orekit`` and ``org.*`` imports). Static check, as
-    PK-01b.
+    Finding F24: it repeated the ``srp_orekit`` pattern (module-level
+    ``start_orekit`` and ``org.*`` imports); R3 moved both into ``_java()``.
+    Static check, as PK-01b.
     """
     path = _module_source_path("contigo.contigo_utils.jb08_utils")
     assert import_time_jvm_use(path.read_text(encoding="utf-8")) == []

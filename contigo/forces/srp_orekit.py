@@ -1,6 +1,9 @@
 """Derive SRP accelerations for an Earth orbiting spacecraft using
 the Orekit library.
 
+Importing this module does not start the JVM: Orekit is started (and its
+Java classes imported) on first use, when ``SRPOrekitCB`` is instantiated.
+
 added: 23/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
@@ -11,14 +14,6 @@ import contigo.config as config
 from contigo.constellation import Constellation
 from contigo.forces.base import ForceModel
 from contigo.solar_system_ephem import SolarSystemEnvironment
-
-if config.state["orekit_loaded"] is False:
-    from contigo.contigo_utils import orekit_utils
-
-    orekit_utils.start_orekit()
-
-from org.contigo.orekit_utils import SRPCannonballBatchHelper
-from org.orekit.time import AbsoluteDate, TimeScalesFactory
 
 
 class SRPOrekitCB(ForceModel):
@@ -33,13 +28,24 @@ class SRPOrekitCB(ForceModel):
 
         Wrapper for the batch processing java class SRPCannonballBatchHelper.
 
-        Requires Orekit and the JVM to be running.
+        Starts Orekit and the JVM on first use if they are not running yet.
 
         Parameters
         ----------
         """
 
-        pass
+        if config.state["orekit_loaded"] is False:
+            from contigo.contigo_utils import orekit_utils
+
+            orekit_utils.start_orekit()
+
+        # Java imports deferred until JVM is running
+        from org.contigo.orekit_utils import SRPCannonballBatchHelper
+        from org.orekit.time import AbsoluteDate, TimeScalesFactory
+
+        self._AbsoluteDate = AbsoluteDate
+        self._TimeScalesFactory = TimeScalesFactory
+        self._SRPCannonballBatchHelper = SRPCannonballBatchHelper
 
     def acceleration(
         self, constellation: Constellation, solarsys_env: SolarSystemEnvironment
@@ -65,13 +71,13 @@ class SRPOrekitCB(ForceModel):
         Uses Orekit's SolarRadiationPressure model via JPype bridge.
         """
         acc_dict = {}
-        utc = TimeScalesFactory.getUTC()
+        utc = self._TimeScalesFactory.getUTC()
 
         for sc_id, sc in constellation.spacecraft.items():
 
             utc_time = sc.sc_utc
             first_dt = utc_time[0]
-            ref_date = AbsoluteDate(
+            ref_date = self._AbsoluteDate(
                 first_dt.year,
                 first_dt.month,
                 first_dt.day,
@@ -84,7 +90,7 @@ class SRPOrekitCB(ForceModel):
                 [(t - first_dt).total_seconds() for t in utc_time], dtype=np.float64
             )
 
-            acc = SRPCannonballBatchHelper.get_acc(
+            acc = self._SRPCannonballBatchHelper.get_acc(
                 ref_date,
                 offsets,
                 sc.state_ecef,
