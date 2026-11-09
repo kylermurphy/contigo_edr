@@ -6,18 +6,18 @@ Uses numba and jit to perform faster calculations of gravitational potential.
 added: 03/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
-import pyshtools
 import numba
 import numpy as np
+import pyshtools
 
 
-def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
+def read_icgem_coeff(file_path: str, encoding: str = "ISO-8859-1"):
     """Read the ICGEM gravitational field model coefficients.
 
     Parameters
     ----------
     file_path : str or path like object
-        Path to ICGEM global earth data model coeffecients 
+        Path to ICGEM global earth data model coeffecients
     encoding : str, optional
         Encoding for reading the files, by default "ISO-8859-1".
         Some files use special characters so a more inclusive encoding is needed.
@@ -36,8 +36,9 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
     https://icgem.gfz.de/
     """
     product = r0 = gm = lmax = None
+    clm = slm = None
     with open(file_path, "r", encoding=encoding) as potfile:
-        #reader = csv.reader(potfile, delimiter=" ", skipinitialspace=True)
+        # reader = csv.reader(potfile, delimiter=" ", skipinitialspace=True)
         for line in potfile:
             row = line.strip()
             if len(row) < 1:
@@ -45,29 +46,39 @@ def read_icgem_coeff(file_path: str, encoding: str ="ISO-8859-1"):
             else:
                 row = row.split()
 
-            if row[0] == 'gfc':
-                if 'clm' not in dir():
-                    raise ValueError("max_degree header must appear before gfc data lines")
+            if row[0] == "gfc":
+                if clm is None:
+                    raise ValueError(
+                        "max_degree header must appear before gfc data lines"
+                    )
                 l = int(row[1])
                 m = int(row[2])
-                clm[l,m] = float(row[3].upper().replace('D', 'e') if 'D' in row[3].upper() else row[3])
-                slm[l,m] = float(row[4].upper().replace('D', 'e') if 'D' in row[4].upper() else row[4])
-            elif row[0] == 'max_degree':
+                clm[l, m] = float(
+                    row[3].upper().replace("D", "e")
+                    if "D" in row[3].upper()
+                    else row[3]
+                )
+                slm[l, m] = float(
+                    row[4].upper().replace("D", "e")
+                    if "D" in row[4].upper()
+                    else row[4]
+                )
+            elif row[0] == "max_degree":
                 lmax = int(row[1])
-                type(lmax)
-                clm = np.zeros((lmax+1,lmax+1))
-                slm = np.zeros((lmax+1,lmax+1))
-            elif row[0] == 'product_type':
+                clm = np.zeros((lmax + 1, lmax + 1))
+                slm = np.zeros((lmax + 1, lmax + 1))
+            elif row[0] == "product_type":
                 product = row[1]
-            elif row[0] == 'radius':
+            elif row[0] == "radius":
                 r0 = float(row[1])
-            elif row[0] == 'earth_gravity_constant':
+            elif row[0] == "earth_gravity_constant":
                 gm = float(row[1])
 
     if any(v is None for v in [product, r0, gm, lmax]):
         raise ValueError(f"ICGEM file missing required header fields in {file_path}")
 
-    return clm, slm, {'product':product,'r0':r0, 'GM':gm, 'lmax':lmax}
+    return clm, slm, {"product": product, "r0": r0, "GM": gm, "lmax": lmax}
+
 
 def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     """Derive Gravitational Potential
@@ -105,7 +116,7 @@ def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
     """
     # Get normalized Legendre functions at the target latitude
     # Note: 'geodesy' normalization is required for EGM96
-    theta = np.pi/2 - lat  # Convert latitude (radians) to colatitude (radians)
+    theta = np.pi / 2 - lat  # Convert latitude (radians) to colatitude (radians)
     # Ensure the Legendre array is explicitly a C-contiguous 2D numpy array for Numba
     p_normalized = pyshtools.legendre.PlmBar(lmax, np.cos(theta))
 
@@ -118,15 +129,18 @@ def get_potential(r, lat, lon, clm, slm, gm, r0, lmax=50):
 
     # Call the numba-jitted core function, passing the 2D Legendre array
     potential_sum_core = _get_potential_numba_core(
-        lmax, rad_ratio, p_normalized, clm, slm, cos_m_lon, sin_m_lon)
+        lmax, rad_ratio, p_normalized, clm, slm, cos_m_lon, sin_m_lon
+    )
 
     # Final Potential V = (GM/r) * (1 + sum)
     v = (gm / r) * (1 + potential_sum_core)
     return v
 
+
 @numba.jit(nopython=True, fastmath=True)
-def _get_potential_numba_core(lmax, rad_ratio, p_normalized, 
-                              clm_arr, slm_arr, cos_m_lon, sin_m_lon):
+def _get_potential_numba_core(
+    lmax, rad_ratio, p_normalized, clm_arr, slm_arr, cos_m_lon, sin_m_lon
+):
     """Numba/JIT function to perform potential summation
 
     Parameters
@@ -150,7 +164,7 @@ def _get_potential_numba_core(lmax, rad_ratio, p_normalized,
     -------
     float
         Potential double for loop sum
-    """    
+    """
     potential_sum = 0.0
 
     for l in range(2, lmax + 1):
@@ -206,7 +220,7 @@ def get_potential_batch(r, lat, lon, clm, slm, gm, r0, lmax=50):
         Gravitational potential at each position (m^2/s^2).
     """
     N = len(r)
-    theta = np.pi / 2 - lat                          # (N,) colatitude
+    theta = np.pi / 2 - lat  # (N,) colatitude
 
     # PlmBar only accepts a scalar — one Python call per point is unavoidable,
     # but this is now the only remaining Python-level loop.
@@ -216,21 +230,28 @@ def get_potential_batch(r, lat, lon, clm, slm, gm, r0, lmax=50):
         p_all[i] = pyshtools.legendre.PlmBar(lmax, np.cos(theta[i]))
 
     # All remaining setup is vectorised numpy — no per-point Python calls.
-    rad_ratio = (r0 / r).astype(np.float64)          # (N,)
-    m_values  = np.arange(lmax + 1, dtype=np.float64)
-    cos_m_lon = np.cos(np.outer(lon, m_values))       # (N, lmax+1)
-    sin_m_lon = np.sin(np.outer(lon, m_values))       # (N, lmax+1)
+    rad_ratio = (r0 / r).astype(np.float64)  # (N,)
+    m_values = np.arange(lmax + 1, dtype=np.float64)
+    cos_m_lon = np.cos(np.outer(lon, m_values))  # (N, lmax+1)
+    sin_m_lon = np.sin(np.outer(lon, m_values))  # (N, lmax+1)
 
     return _get_potential_numba_batch(
-        lmax, rad_ratio, p_all,
-        np.ascontiguousarray(clm), np.ascontiguousarray(slm),
-        cos_m_lon, sin_m_lon, gm, r0)
+        lmax,
+        rad_ratio,
+        p_all,
+        np.ascontiguousarray(clm),
+        np.ascontiguousarray(slm),
+        cos_m_lon,
+        sin_m_lon,
+        gm,
+        r0,
+    )
 
 
 @numba.jit(nopython=True, parallel=True, fastmath=True)
-def _get_potential_numba_batch(lmax, rad_ratio, p_all,
-                                clm_arr, slm_arr,
-                                cos_m_lon, sin_m_lon, gm, r0):
+def _get_potential_numba_batch(
+    lmax, rad_ratio, p_all, clm_arr, slm_arr, cos_m_lon, sin_m_lon, gm, r0
+):
     """Parallel Numba kernel: gravitational potential for N positions.
 
     Parameters
@@ -263,16 +284,16 @@ def _get_potential_numba_batch(lmax, rad_ratio, p_all,
     v = np.empty(N, dtype=np.float64)
 
     for n in numba.prange(N):
-        rr = rad_ratio[n]               # r0 / r[n]
+        rr = rad_ratio[n]  # r0 / r[n]
         potential_sum = 0.0
         for l in range(2, lmax + 1):
             inner_sum = 0.0
-            r_l = rr ** l
+            r_l = rr**l
             for m in range(l + 1):
                 p_ind = l * (l + 1) // 2 + m
-                inner_sum += (p_all[n, p_ind]
-                              * (clm_arr[l, m] * cos_m_lon[n, m]
-                                 + slm_arr[l, m] * sin_m_lon[n, m]))
+                inner_sum += p_all[n, p_ind] * (
+                    clm_arr[l, m] * cos_m_lon[n, m] + slm_arr[l, m] * sin_m_lon[n, m]
+                )
             potential_sum += r_l * inner_sum
 
         # gm/r[n] = gm * rad_ratio[n] / r0  (since rad_ratio = r0/r)

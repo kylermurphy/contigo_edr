@@ -35,6 +35,7 @@ Caveats / design decisions
 * Longitude is treated as a *circular* dimension so that the 0°/360°
   seam is handled correctly.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -48,10 +49,10 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Data containers
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class HASDMGrid:
@@ -73,11 +74,12 @@ class HASDMGrid:
     alt : ndarray, shape (n_alt,)
         Altitudes above EGM-96 geoid in metres (m), ascending.
     """
+
     density: np.ndarray
-    times:   np.ndarray
-    lat:     np.ndarray
-    lon:     np.ndarray
-    alt:     np.ndarray
+    times: np.ndarray
+    lat: np.ndarray
+    lon: np.ndarray
+    alt: np.ndarray
 
     @property
     def shape(self) -> tuple[int, int, int, int]:
@@ -111,17 +113,19 @@ class HASDMMatch(NamedTuple):
         Absolute time difference in seconds between the HASDM epoch and
         the matched satellite sample.
     """
+
     i_time: int
-    i_lat:  int
-    i_lon:  int
-    i_alt:  int
-    i_sat:  int
+    i_lat: int
+    i_lon: int
+    i_alt: int
+    i_sat: int
     dt_sec: float
 
 
 # ---------------------------------------------------------------------------
 # File reader — private helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_hasdm_file(filepath: Path) -> pd.DataFrame:
     """
@@ -146,20 +150,29 @@ def _parse_hasdm_file(filepath: Path) -> pd.DataFrame:
     # --- resolve compression from suffix ------------------------------------
     suffix = filepath.suffix.lower()
     if suffix == ".gz":
-        _opener    = lambda: gzip.open(filepath, "rt", encoding="utf-8")
+
+        def _opener():
+            return gzip.open(filepath, "rt", encoding="utf-8")
+
         _csv_kw: dict = {"compression": "gzip"}
     elif suffix == ".zip":
-        zf      = zipfile.ZipFile(filepath, "r")
+        zf = zipfile.ZipFile(filepath, "r")
         members = zf.namelist()
         if len(members) != 1:
             raise ValueError(
                 f"Expected exactly 1 file inside {filepath.name}, "
                 f"found {len(members)}: {members}"
             )
-        _opener = lambda: io.TextIOWrapper(zf.open(members[0]), encoding="utf-8")
+
+        def _opener():
+            return io.TextIOWrapper(zf.open(members[0]), encoding="utf-8")
+
         _csv_kw = {"compression": "zip"}
     else:
-        _opener = lambda: filepath.open("r", encoding="utf-8")
+
+        def _opener():
+            return filepath.open("r", encoding="utf-8")
+
         _csv_kw = {}
 
     # --- count header lines (lines starting with ':' or '#') ----------------
@@ -167,7 +180,11 @@ def _parse_hasdm_file(filepath: Path) -> pd.DataFrame:
     with _opener() as fh:
         for line in fh:
             stripped = line.strip()
-            if stripped and not stripped.startswith(":") and not stripped.startswith("#"):
+            if (
+                stripped
+                and not stripped.startswith(":")
+                and not stripped.startswith("#")
+            ):
                 break
             n_skip += 1
 
@@ -181,12 +198,12 @@ def _parse_hasdm_file(filepath: Path) -> pd.DataFrame:
         names=col_names,
         dtype={
             "datetime_str": str,
-            "julian_day":   np.float64,
-            "alt":          np.float64,
-            "lat":          np.float64,
-            "lon":          np.float64,
-            "lst":          np.float64,
-            "rho":          np.float64,
+            "julian_day": np.float64,
+            "alt": np.float64,
+            "lat": np.float64,
+            "lon": np.float64,
+            "lst": np.float64,
+            "rho": np.float64,
         },
         **_csv_kw,
     )
@@ -197,10 +214,9 @@ def _parse_hasdm_file(filepath: Path) -> pd.DataFrame:
     # --- parse timestamps to tz-naive UTC datetime64[ns] --------------------
     # tz_localize(None) drops the tz tag while keeping the UTC values so
     # that numpy searchsorted and comparisons work without friction.
-    df["time"] = (
-        pd.to_datetime(df["datetime_str"], format="%Y%m%d%H%M", utc=True)
-        .dt.tz_localize(None)
-    )
+    df["time"] = pd.to_datetime(
+        df["datetime_str"], format="%Y%m%d%H%M", utc=True
+    ).dt.tz_localize(None)
 
     # --- convert altitude from km (file native) to metres (SI) ----------
     df["alt"] = df["alt"] * 1_000.0
@@ -249,10 +265,10 @@ def _build_hasdm_grid(df: pd.DataFrame) -> HASDMGrid:
         If any NaN cells remain in the density array after filling.
     """
     # --- infer grid axes from the data --------------------------------------
-    times = np.sort(df["time"].unique())   # datetime64[ns] UTC tz-naive
-    lats  = np.sort(df["lat"].unique())    # geocentric deg
-    lons  = np.sort(df["lon"].unique())    # geographic deg [0, 360)
-    alts  = np.sort(df["alt"].unique())    # metres above EGM-96
+    times = np.sort(df["time"].unique())  # datetime64[ns] UTC tz-naive
+    lats = np.sort(df["lat"].unique())  # geocentric deg
+    lons = np.sort(df["lon"].unique())  # geographic deg [0, 360)
+    alts = np.sort(df["alt"].unique())  # metres above EGM-96
 
     n_t, n_lat, n_lon, n_alt = len(times), len(lats), len(lons), len(alts)
 
@@ -269,10 +285,10 @@ def _build_hasdm_grid(df: pd.DataFrame) -> HASDMGrid:
     # --- vectorised index mapping -------------------------------------------
     # searchsorted is exact here because both sides come from the same
     # parsed floats — no independent coordinate arithmetic involved.
-    t_idx   = np.searchsorted(times, df["time"].values)
-    lat_idx = np.searchsorted(lats,  df["lat"].values)
-    lon_idx = np.searchsorted(lons,  df["lon"].values)
-    alt_idx = np.searchsorted(alts,  df["alt"].values)
+    t_idx = np.searchsorted(times, df["time"].values)
+    lat_idx = np.searchsorted(lats, df["lat"].values)
+    lon_idx = np.searchsorted(lons, df["lon"].values)
+    alt_idx = np.searchsorted(alts, df["alt"].values)
 
     # --- fill density array -------------------------------------------------
     density = np.full((n_t, n_lat, n_lon, n_alt), np.nan, dtype=np.float64)
@@ -293,6 +309,7 @@ def _build_hasdm_grid(df: pd.DataFrame) -> HASDMGrid:
 # ---------------------------------------------------------------------------
 # File reader — public API
 # ---------------------------------------------------------------------------
+
 
 def read_hasdm(
     filepaths: str | Path | list[str | Path],
@@ -390,9 +407,10 @@ def read_hasdm(
 # Spatial index lookup
 # ---------------------------------------------------------------------------
 
-def _circular_nearest(values: np.ndarray,
-                       queries: np.ndarray,
-                       period: float = 360.0) -> np.ndarray:
+
+def _circular_nearest(
+    values: np.ndarray, queries: np.ndarray, period: float = 360.0
+) -> np.ndarray:
     """
     Vectorised nearest-neighbour on a circular axis.
 
@@ -412,10 +430,10 @@ def _circular_nearest(values: np.ndarray,
     -------
     ndarray of int, shape (m,)
     """
-    queries = queries % period                             # (m,)
-    delta = np.abs(values[:, None] - queries[None, :])    # (n, m)
-    delta = np.minimum(delta, period - delta)             # wrap-around
-    return np.argmin(delta, axis=0).astype(int)           # (m,)
+    queries = queries % period  # (m,)
+    delta = np.abs(values[:, None] - queries[None, :])  # (n, m)
+    delta = np.minimum(delta, period - delta)  # wrap-around
+    return np.argmin(delta, axis=0).astype(int)  # (m,)
 
 
 def find_spatial_index(
@@ -461,13 +479,14 @@ def find_spatial_index(
 # Time-space matching: HASDM epochs ↔ satellite track
 # ---------------------------------------------------------------------------
 
+
 def match_satellite_to_hasdm(
-    grid:      HASDMGrid,
+    grid: HASDMGrid,
     sat_times: np.ndarray,
-    sat_lat:   np.ndarray,
-    sat_lon:   np.ndarray,
-    sat_alt:   np.ndarray,
-    max_dt:    pd.Timedelta | None = pd.Timedelta(hours=1, minutes=30),
+    sat_lat: np.ndarray,
+    sat_lon: np.ndarray,
+    sat_alt: np.ndarray,
+    max_dt: pd.Timedelta | None = pd.Timedelta(hours=1, minutes=30),
 ) -> list[HASDMMatch]:
     """
     For each HASDM epoch, find the satellite state closest in time and
@@ -522,14 +541,15 @@ def match_satellite_to_hasdm(
     if not np.all(sort_order == np.arange(n_sat)):
         warnings.warn(
             "sat_times is not sorted; sorting in-place for matching.",
-            UserWarning, stacklevel=2,
+            UserWarning,
+            stacklevel=2,
         )
         sat_times = sat_times[sort_order]
-        sat_lat   = sat_lat[sort_order]
-        sat_lon   = sat_lon[sort_order]
-        sat_alt   = sat_alt[sort_order]
+        sat_lat = sat_lat[sort_order]
+        sat_lon = sat_lon[sort_order]
+        sat_alt = sat_alt[sort_order]
 
-    sat_ns  = sat_times.astype(np.int64)   # ns since epoch
+    sat_ns = sat_times.astype(np.int64)  # ns since epoch
     grid_ns = grid.times.astype("datetime64[ns]").astype(np.int64)
 
     max_dt_ns = (
@@ -540,12 +560,12 @@ def match_satellite_to_hasdm(
 
     # --- vectorised nearest-time matching via searchsorted ------------------
     # insert_pos[i] = where grid_ns[i] would sit in sat_ns
-    insert_pos = np.searchsorted(sat_ns, grid_ns)           # (n_hasdm,)
+    insert_pos = np.searchsorted(sat_ns, grid_ns)  # (n_hasdm,)
 
-    i_left  = np.clip(insert_pos - 1, 0, n_sat - 1)
-    i_right = np.clip(insert_pos,     0, n_sat - 1)
+    i_left = np.clip(insert_pos - 1, 0, n_sat - 1)
+    i_right = np.clip(insert_pos, 0, n_sat - 1)
 
-    diff_left  = np.abs(sat_ns[i_left]  - grid_ns)
+    diff_left = np.abs(sat_ns[i_left] - grid_ns)
     diff_right = np.abs(sat_ns[i_right] - grid_ns)
 
     # pick whichever neighbour is closer
@@ -553,7 +573,7 @@ def match_satellite_to_hasdm(
     dt_ns_arr = np.where(diff_right <= diff_left, diff_right, diff_left)
 
     # --- build valid/invalid mask -------------------------------------------
-    valid = dt_ns_arr <= max_dt_ns   # (n_hasdm,)
+    valid = dt_ns_arr <= max_dt_ns  # (n_hasdm,)
 
     # --- vectorised spatial lookup for valid epochs -------------------------
     valid_idx = np.where(valid)[0]
@@ -610,13 +630,14 @@ def match_satellite_to_hasdm(
 # Convenience extractor
 # ---------------------------------------------------------------------------
 
+
 def extract_along_track_density(
-    grid:      HASDMGrid,
+    grid: HASDMGrid,
     sat_times: np.ndarray,
-    sat_lat:   np.ndarray,
-    sat_lon:   np.ndarray,
-    sat_alt:   np.ndarray,
-    max_dt:    pd.Timedelta | None = pd.Timedelta(hours=1, minutes=30),
+    sat_lat: np.ndarray,
+    sat_lon: np.ndarray,
+    sat_alt: np.ndarray,
+    max_dt: pd.Timedelta | None = pd.Timedelta(hours=1, minutes=30),
 ) -> pd.DataFrame:
     """
     Extract HASDM density along a satellite track.
@@ -662,49 +683,53 @@ def extract_along_track_density(
     sat_times_ns = np.asarray(sat_times, dtype="datetime64[ns]")
     sort_order = np.argsort(sat_times_ns)
     sat_times_sorted = sat_times_ns[sort_order]
-    sat_lat_sorted   = sat_lat[sort_order]
-    sat_lon_sorted   = sat_lon[sort_order]
-    sat_alt_sorted   = sat_alt[sort_order]
+    sat_lat_sorted = sat_lat[sort_order]
+    sat_lon_sorted = sat_lon[sort_order]
+    sat_alt_sorted = sat_alt[sort_order]
 
     rows = []
     for m in matches:
         hasdm_time = grid.times[m.i_time]
-        sat_time   = sat_times_sorted[m.i_sat]
+        sat_time = sat_times_sorted[m.i_sat]
 
         if m.i_lat == -1:
-            rows.append(dict(
-                hasdm_time=hasdm_time,
-                sat_time=sat_time,
-                sat_lat=float(sat_lat_sorted[m.i_sat]),
-                sat_lon=float(sat_lon_sorted[m.i_sat]),
-                sat_alt=float(sat_alt_sorted[m.i_sat]),
-                hasdm_lat=np.nan,
-                hasdm_lon=np.nan,
-                hasdm_alt=np.nan,
-                rho=np.nan,
-                dt_sec=m.dt_sec,
-                i_time=m.i_time,
-                i_lat=m.i_lat,
-                i_lon=m.i_lon,
-                i_alt=m.i_alt,
-            ))
+            rows.append(
+                dict(
+                    hasdm_time=hasdm_time,
+                    sat_time=sat_time,
+                    sat_lat=float(sat_lat_sorted[m.i_sat]),
+                    sat_lon=float(sat_lon_sorted[m.i_sat]),
+                    sat_alt=float(sat_alt_sorted[m.i_sat]),
+                    hasdm_lat=np.nan,
+                    hasdm_lon=np.nan,
+                    hasdm_alt=np.nan,
+                    rho=np.nan,
+                    dt_sec=m.dt_sec,
+                    i_time=m.i_time,
+                    i_lat=m.i_lat,
+                    i_lon=m.i_lon,
+                    i_alt=m.i_alt,
+                )
+            )
         else:
-            rows.append(dict(
-                hasdm_time=hasdm_time,
-                sat_time=sat_time,
-                sat_lat=float(sat_lat_sorted[m.i_sat]),
-                sat_lon=float(sat_lon_sorted[m.i_sat]),
-                sat_alt=float(sat_alt_sorted[m.i_sat]),
-                hasdm_lat=float(grid.lat[m.i_lat]),
-                hasdm_lon=float(grid.lon[m.i_lon]),
-                hasdm_alt=float(grid.alt[m.i_alt]),
-                rho=float(grid.density[m.i_time, m.i_lat, m.i_lon, m.i_alt]),
-                dt_sec=m.dt_sec,
-                i_time=m.i_time,
-                i_lat=m.i_lat,
-                i_lon=m.i_lon,
-                i_alt=m.i_alt,
-            ))
+            rows.append(
+                dict(
+                    hasdm_time=hasdm_time,
+                    sat_time=sat_time,
+                    sat_lat=float(sat_lat_sorted[m.i_sat]),
+                    sat_lon=float(sat_lon_sorted[m.i_sat]),
+                    sat_alt=float(sat_alt_sorted[m.i_sat]),
+                    hasdm_lat=float(grid.lat[m.i_lat]),
+                    hasdm_lon=float(grid.lon[m.i_lon]),
+                    hasdm_alt=float(grid.alt[m.i_alt]),
+                    rho=float(grid.density[m.i_time, m.i_lat, m.i_lon, m.i_alt]),
+                    dt_sec=m.dt_sec,
+                    i_time=m.i_time,
+                    i_lat=m.i_lat,
+                    i_lon=m.i_lon,
+                    i_alt=m.i_alt,
+                )
+            )
 
     return pd.DataFrame(rows)
 
@@ -713,8 +738,9 @@ def extract_along_track_density(
 # Future work: trilinear interpolation stub
 # ---------------------------------------------------------------------------
 
+
 def interp_along_track(
-    grid:    HASDMGrid,
+    grid: HASDMGrid,
     matches: list[HASDMMatch],
     sat_lat: np.ndarray,
     sat_lon: np.ndarray,

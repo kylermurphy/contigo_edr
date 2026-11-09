@@ -2,11 +2,10 @@
 
 added: 04/03/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
+
 import numpy as np
-import numpy.typing as npt
 
 import contigo.config as config
-
 from contigo.ephemeris.base import EphemerisProvider
 
 
@@ -15,17 +14,17 @@ class OrekitEphem(EphemerisProvider):
     Orekit-backed ephemeris provider.
     """
 
-    def __init__(self,
-                 ephemeris: str = 'de440s'):
+    def __init__(self, ephemeris: str = "de440s"):
 
-        if config.state['orekit_loaded'] is False:
+        if config.state["orekit_loaded"] is False:
             from contigo.contigo_utils import orekit_utils
+
             orekit_utils.start_orekit()
 
         # Java imports deferred until JVM is running
         from java.util import ArrayList
-        from org.orekit.time import AbsoluteDate, TimeScalesFactory
         from org.contigo.orekit_utils import EphemerisBatchHelper
+        from org.orekit.time import AbsoluteDate, TimeScalesFactory
 
         self._ArrayList = ArrayList
         self._AbsoluteDate = AbsoluteDate
@@ -34,11 +33,13 @@ class OrekitEphem(EphemerisProvider):
 
         self.ephemeris = ephemeris
 
-    def __call__(self, body: list[str],
-                 utc_time: np.ndarray | None = None,
-                 gps_time: None = None,
-                 ephem_time: None = None,
-                 ):
+    def __call__(
+        self,
+        body: list[str],
+        utc_time: np.ndarray | None = None,
+        gps_time: None = None,
+        ephem_time: None = None,
+    ):
         """
         Compute positions of celestial bodies.
 
@@ -64,15 +65,21 @@ class OrekitEphem(EphemerisProvider):
         """
         utc = self._TimeScalesFactory.getUTC()
         first_dt = utc_time[0]
-        ref_date = self._AbsoluteDate(first_dt.year, first_dt.month, first_dt.day,
-                                      first_dt.hour, first_dt.minute,
-                                      float(first_dt.second), utc)
+        ref_date = self._AbsoluteDate(
+            first_dt.year,
+            first_dt.month,
+            first_dt.day,
+            first_dt.hour,
+            first_dt.minute,
+            float(first_dt.second),
+            utc,
+        )
         offsets = np.array(
-            [(t - first_dt).total_seconds() for t in utc_time],
-            dtype=np.float64)
+            [(t - first_dt).total_seconds() for t in utc_time], dtype=np.float64
+        )
 
-        r_body = self._EphemerisBatchHelper.getBodyECEF(ref_date,
-                                                        offsets,
-                                                        self._ArrayList(body))
+        r_body = self._EphemerisBatchHelper.getBodyECEF(
+            ref_date, offsets, self._ArrayList(body)
+        )
 
         return np.array(r_body, dtype=np.float64)

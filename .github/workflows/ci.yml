@@ -1,7 +1,6 @@
 # CONTIGO continuous integration (docs/phase0_plan.md, task 0.5a).
 #
-# lint : ruff + black on the code that is held to the lint standard. The rest
-#        of contigo/ joins after the mechanical clean-up PR (refactor R13).
+# lint : ruff + black on the whole package and the tests.
 # test : non-editable install, then the fast pytest tier on every supported
 #        Python. Tests marked network/orekit/slow are skipped (see
 #        tests/conftest.py). Installing non-editable means the tests exercise
@@ -33,9 +32,9 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff black
       - name: ruff
-        run: ruff check tests contigo/plotting
+        run: ruff check contigo tests
       - name: black
-        run: black --check tests contigo/plotting
+        run: black --check contigo tests
 
   test:
     runs-on: ubuntu-latest

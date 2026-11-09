@@ -39,18 +39,20 @@ import numpy as np
 import numpy.typing as npt
 
 import contigo.config as config
-if config.state['orekit_loaded'] is False:
+
+if config.state["orekit_loaded"] is False:
     from contigo.contigo_utils import orekit_utils
+
     orekit_utils.start_orekit()
 
-from org.orekit.time import AbsoluteDate, TimeScalesFactory
 from org.contigo.orekit_utils import JB2008DensityBatchHelper
+from org.orekit.time import AbsoluteDate, TimeScalesFactory
 
 # All nine JB2008 space weather parameter names in the order accepted by
 # JB2008DensityBatchHelper.getDensity.
-_SW_NAMES = ('f10', 'f10b', 's10', 's10b', 'xm10', 'xm10b', 'y10', 'y10b', 'dstdtc')
+_SW_NAMES = ("f10", "f10b", "s10", "s10b", "xm10", "xm10b", "y10", "y10b", "dstdtc")
 
-_VALID_COORDS = {'ecef', 'geodetic'}
+_VALID_COORDS = {"ecef", "geodetic"}
 
 # JB2008 minimum altitude threshold (metres) enforced by Orekit.
 _JB2008_ALT_MIN_M = 90_000.0
@@ -112,24 +114,22 @@ def _validate_geodetic(positions: npt.NDArray[np.float64]) -> None:
                 f"Check that altitude is in metres and the column order is "
                 f"[lat_deg, lon_deg, alt_m]."
             )
-        raise ValueError(
-            f"Invalid geodetic altitude for JB2008: {hint}"
-        )
+        raise ValueError(f"Invalid geodetic altitude for JB2008: {hint}")
 
 
 def jb2008_density(
     positions: npt.NDArray[np.float64],
     times: Sequence[datetime],
     *,
-    coords: Literal['ecef', 'geodetic'] = 'ecef',
-    f10:    npt.NDArray[np.float64] | None = None,
-    f10b:   npt.NDArray[np.float64] | None = None,
-    s10:    npt.NDArray[np.float64] | None = None,
-    s10b:   npt.NDArray[np.float64] | None = None,
-    xm10:   npt.NDArray[np.float64] | None = None,
-    xm10b:  npt.NDArray[np.float64] | None = None,
-    y10:    npt.NDArray[np.float64] | None = None,
-    y10b:   npt.NDArray[np.float64] | None = None,
+    coords: Literal["ecef", "geodetic"] = "ecef",
+    f10: npt.NDArray[np.float64] | None = None,
+    f10b: npt.NDArray[np.float64] | None = None,
+    s10: npt.NDArray[np.float64] | None = None,
+    s10b: npt.NDArray[np.float64] | None = None,
+    xm10: npt.NDArray[np.float64] | None = None,
+    xm10b: npt.NDArray[np.float64] | None = None,
+    y10: npt.NDArray[np.float64] | None = None,
+    y10b: npt.NDArray[np.float64] | None = None,
     dstdtc: npt.NDArray[np.float64] | None = None,
 ) -> npt.NDArray[np.float64]:
     """Compute JB2008 atmospheric density along a satellite track.
@@ -212,30 +212,28 @@ def jb2008_density(
     ... )
     """
     if coords not in _VALID_COORDS:
-        raise ValueError(
-            f"coords must be one of {_VALID_COORDS!r}, got {coords!r}"
-        )
+        raise ValueError(f"coords must be one of {_VALID_COORDS!r}, got {coords!r}")
 
     sw_vals = (f10, f10b, s10, s10b, xm10, xm10b, y10, y10b, dstdtc)
     n_supplied = sum(v is not None for v in sw_vals)
 
     if 0 < n_supplied < len(_SW_NAMES):
-        missing = [name for name, val in zip(_SW_NAMES, sw_vals) if val is None]
+        missing = [
+            name for name, val in zip(_SW_NAMES, sw_vals, strict=True) if val is None
+        ]
         raise ValueError(
             f"All nine space weather indices must be supplied together. "
             f"Missing: {missing}"
         )
 
     use_sw = n_supplied == len(_SW_NAMES)
-    geodetic = coords == 'geodetic'
+    geodetic = coords == "geodetic"
 
     positions = np.asarray(positions, dtype=np.float64)
     n = len(times)
 
     if positions.shape != (n, 3):
-        raise ValueError(
-            f"positions must have shape (N, 3), got {positions.shape}"
-        )
+        raise ValueError(f"positions must have shape (N, 3), got {positions.shape}")
 
     if geodetic:
         _validate_geodetic(positions)
@@ -245,8 +243,12 @@ def jb2008_density(
     utc = TimeScalesFactory.getUTC()
     t0 = times[0]
     ref_date = AbsoluteDate(
-        t0.year, t0.month, t0.day,
-        t0.hour, t0.minute, float(t0.second),
+        t0.year,
+        t0.month,
+        t0.day,
+        t0.hour,
+        t0.minute,
+        float(t0.second),
         utc,
     )
     offsets = np.array(
@@ -256,21 +258,25 @@ def jb2008_density(
 
     if use_sw:
         density = JB2008DensityBatchHelper.getDensity(
-            ref_date, offsets, positions,
+            ref_date,
+            offsets,
+            positions,
             geodetic,
-            np.asarray(f10,    dtype=np.float64),
-            np.asarray(f10b,   dtype=np.float64),
-            np.asarray(s10,    dtype=np.float64),
-            np.asarray(s10b,   dtype=np.float64),
-            np.asarray(xm10,   dtype=np.float64),
-            np.asarray(xm10b,  dtype=np.float64),
-            np.asarray(y10,    dtype=np.float64),
-            np.asarray(y10b,   dtype=np.float64),
+            np.asarray(f10, dtype=np.float64),
+            np.asarray(f10b, dtype=np.float64),
+            np.asarray(s10, dtype=np.float64),
+            np.asarray(s10b, dtype=np.float64),
+            np.asarray(xm10, dtype=np.float64),
+            np.asarray(xm10b, dtype=np.float64),
+            np.asarray(y10, dtype=np.float64),
+            np.asarray(y10b, dtype=np.float64),
             np.asarray(dstdtc, dtype=np.float64),
         )
     else:
         density = JB2008DensityBatchHelper.getDensityFromOrekitData(
-            ref_date, offsets, positions,
+            ref_date,
+            offsets,
+            positions,
             geodetic,
         )
 

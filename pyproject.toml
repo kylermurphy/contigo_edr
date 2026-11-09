@@ -94,7 +94,10 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
-ignore = ["E501"]
+# E501: black handles line length. E741: `l` is the standard symbol for the
+# spherical-harmonic degree. B008: the defaults flagged (pd.Timedelta, small
+# np.array) are never mutated.
+ignore = ["E501", "E741", "B008"]
 
 [tool.pytest.ini_options]
 addopts = "-ra -q"

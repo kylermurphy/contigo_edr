@@ -2,34 +2,38 @@
 
 added: 17/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
+
 import logging
 from datetime import timezone
 
-import pandas as pd
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
 import spiceypy as spice
 
+from contigo.constellation import Constellation
+from contigo.contigo_utils.constants import GMc
 from contigo.ephemeris.spice_ephem import SPICEEphem
 from contigo.forces.base import ForceModel
 from contigo.solar_system_ephem import SolarSystemEnvironment
 
 from .tba_utils import tba_pairwise_numba
-from contigo.contigo_utils.constants import GMc
-from contigo.constellation import Constellation
 
 logger = logging.getLogger(__name__)
 
+
 class ThirdBodyAcc:
-    """Deriving Third Body Acceleration using JPL SPICE
-    """
-    def __init__(self,
-                 spos: npt.ArrayLike | None = None,
-                 stime: npt.ArrayLike | None = None,
-                 body: npt.ArrayLike | None = None,
-                 GM: npt.ArrayLike | None = None,
-                 scale: str | None = None,
-                 ephemeris: str='de440s'):
+    """Deriving Third Body Acceleration using JPL SPICE"""
+
+    def __init__(
+        self,
+        spos: npt.ArrayLike | None = None,
+        stime: npt.ArrayLike | None = None,
+        body: npt.ArrayLike | None = None,
+        GM: npt.ArrayLike | None = None,
+        scale: str | None = None,
+        ephemeris: str = "de440s",
+    ):
         """Initialize the ThirdBodyAcc Class for deriving acceleration from third
         bodies such as the Sun and Moon.
 
@@ -38,10 +42,10 @@ class ThirdBodyAcc:
 
         The body GM constants are in units of m^3/s^2.
 
-        Uses the SPICE (Spacecraft, Planet, Instrument, C-matrix, Events) observation 
-        geometry information system and Kernels from JPLs Navigation and Ancillary 
+        Uses the SPICE (Spacecraft, Planet, Instrument, C-matrix, Events) observation
+        geometry information system and Kernels from JPLs Navigation and Ancillary
         Information Facility (NAIF) (https://naif.jpl.nasa.gov/naif/index.html).
-        
+
         Required JPL SPICE kernels are downloaded as needed and when changed on the web.
 
         Parameters
@@ -51,10 +55,10 @@ class ThirdBodyAcc:
             by default np.array([6_771_000.0,0,0],ndmin=2)
         stime : npt.ArrayLike (n), optional
             An array of spacecraft times for which the position of body are retrieved.
-            The scale of the time is needed in order to derive JPL SPICE ephemeris 
+            The scale of the time is needed in order to derive JPL SPICE ephemeris
             time (ET). By default pd.Series(pd.to_datetime('2020-01-01')).
         body : npt.ArrayLike, optional
-            A list of bodies for which to calculate accelerations at the location 
+            A list of bodies for which to calculate accelerations at the location
             of a spacecraft (spos), by default ['SUN'].
         GM : npt.ArrayLike | None, optional
             Mass parameters for the bodies in body. Should be in the same order as body.
@@ -62,11 +66,11 @@ class ThirdBodyAcc:
             JPLs de440 mass parameters, by default None.
         scale : str | None, optional
             Time scale of stime; allowed values are 'GPS','TAI','UTC','ET','TDB'.
-            By default None but one is required and a Value error will be thrown if it 
+            By default None but one is required and a Value error will be thrown if it
             is not passed or if it is not one of the allowed values.
         ephemeris : str, optional
             JPL SPICE ephemeris file to use; allowed values are de440 and de440s. 's'
-            denotes the smaller version which covers a shorter time frame. By default 
+            denotes the smaller version which covers a shorter time frame. By default
             'de440s'
 
         Raises
@@ -85,20 +89,22 @@ class ThirdBodyAcc:
             body = ["SUN"]
 
         # allowed ephemeris to load
-        allowed_eph = ['de440','de440s']
+        allowed_eph = ["de440", "de440s"]
         if ephemeris in allowed_eph:
             eph_sh = ephemeris[0:5]
         else:
-            raise ValueError(f'ephemeris must be on of allowed {allowed_eph}')
+            raise ValueError(f"ephemeris must be on of allowed {allowed_eph}")
 
         # allowed time scales for getting third body accelerations
-        allowed_scales = ['GPS','TAI','UTC','ET','TDB']
+        allowed_scales = ["GPS", "TAI", "UTC", "ET", "TDB"]
         if not scale:
-            raise ValueError(f'scale must be one of {allowed_scales}')
-        
+            raise ValueError(f"scale must be one of {allowed_scales}")
+
         scale = scale.upper()
         if scale not in allowed_scales:
-            raise ValueError(f'Incorrect scale {scale}, scale must be one of {allowed_scales}')
+            raise ValueError(
+                f"Incorrect scale {scale}, scale must be one of {allowed_scales}"
+            )
 
         self.spos = np.asarray(spos, dtype=float)
         if self.spos.ndim != 2 or self.spos.shape[1] != 3:
@@ -109,17 +115,17 @@ class ThirdBodyAcc:
             raise ValueError("spos and stime must have be (N,3) and (N)")
 
         self.body = [bd.upper() for bd in body]
-        
+
         self.scale = scale
         if GM is None:
-            self.GM = np.array([GMc[eph_sh][bd] for bd in self.body],dtype=float)
+            self.GM = np.array([GMc[eph_sh][bd] for bd in self.body], dtype=float)
         else:
             self.GM = np.asarray(GM, dtype=float)
 
         if len(self.body) != len(self.GM):
             raise ValueError("body and GM must be same length")
         self.ephemeris = ephemeris
-        #attributes used later
+        # attributes used later
         self.bd_ecef = None
         self.bd_acc = None
 
@@ -127,8 +133,8 @@ class ThirdBodyAcc:
         """Derives third body accelerations from spacecraft positions for solar
         system bodies.
 
-        Uses the SPICE (Spacecraft, Planet, Instrument, C-matrix, Events) observation 
-        geometry information system and Kernels from JPLs Navigation and Ancillary 
+        Uses the SPICE (Spacecraft, Planet, Instrument, C-matrix, Events) observation
+        geometry information system and Kernels from JPLs Navigation and Ancillary
         Information Facility (NAIF).
         """
         # calculate the seconds past j2000 to convert
@@ -136,23 +142,24 @@ class ThirdBodyAcc:
         # this is equivalent to TDB time)
         if self.stime.tzinfo is not None and self.stime.tzinfo != timezone.utc:
             print(str(self.stime.tzinfo))
-            raise ValueError('stime should be time zone naive or UTC')
-        
+            raise ValueError("stime should be time zone naive or UTC")
 
         ephem = SPICEEphem(ephemeris=self.ephemeris)
 
         # set all needed attributes
-        if self.scale == 'UTC':
-            t_str = pd.to_datetime(np.array(self.stime)).strftime('%d %b %Y %H:%M:%S.%f')
-            et = np.array([spice.utc2et(sp_in) for sp_in in t_str]) 
+        if self.scale == "UTC":
+            t_str = pd.to_datetime(np.array(self.stime)).strftime(
+                "%d %b %Y %H:%M:%S.%f"
+            )
+            et = np.array([spice.utc2et(sp_in) for sp_in in t_str])
         else:
-            j2000 = pd.Timestamp('2000-01-01 12:00:00')
+            j2000 = pd.Timestamp("2000-01-01 12:00:00")
             spj2000 = ((self.stime - j2000).total_seconds()).to_list()
-            et = np.array([spice.unitim(sp_in,self.scale,'ET') for sp_in in spj2000])
+            et = np.array([spice.unitim(sp_in, self.scale, "ET") for sp_in in spj2000])
 
         et = np.array(et)
 
-        bd_ecef = ephem(body=self.body,ephem_time=et)
+        bd_ecef = ephem(body=self.body, ephem_time=et)
 
         bd_acc = tba_pairwise_numba(self.spos, bd_ecef, self.GM)
 
@@ -195,10 +202,9 @@ class ThirdBodyEnv(ForceModel):
     def __init__(self):
         pass
 
-    def acceleration(self, 
-                     constellation: Constellation, 
-                     solarsys_env: SolarSystemEnvironment
-                     ) -> dict[str, npt.NDArray[np.float64]]: 
+    def acceleration(
+        self, constellation: Constellation, solarsys_env: SolarSystemEnvironment
+    ) -> dict[str, npt.NDArray[np.float64]]:
         """Derive third body acceleration for a Constellation of Spacecraft from the
         SolarSystemEnvironment
 
@@ -208,14 +214,14 @@ class ThirdBodyEnv(ForceModel):
             Constellation container with the spcaecraft state, physical properties,
             spacecraft IDs, and time arrays.
         solarsys_env : SolarSystemEnvironment
-            Solar System Environment container to load the ephemeris of solar system 
-            bodies. The ephemeris is loaded for the derivation of the third body 
+            Solar System Environment container to load the ephemeris of solar system
+            bodies. The ephemeris is loaded for the derivation of the third body
             accelerations.
 
         Returns
         -------
         dict[str, npt.NDArray[np.float64]]
-            A dictionary keyed by spacecraft ID. The array is an (B,N,3) array where 
+            A dictionary keyed by spacecraft ID. The array is an (B,N,3) array where
             B is the number of bodies in the SolarSystemEnvironment, N is the number of
             spacecraft states, and 3 is the x,y,z components of the third body
             acceleration. The order of the bodies is the same as the order of the bodies
@@ -225,17 +231,17 @@ class ThirdBodyEnv(ForceModel):
 
         for sc_id, sc in constellation.spacecraft.items():
 
-            _,_, _, r_pos = solarsys_env.get_ephem(ephem_time=sc.sspice_et,
-                                                 gps_time=sc.sspice_gps,
-                                                 utc_time=sc.sc_utc)
+            _, _, _, r_pos = solarsys_env.get_ephem(
+                ephem_time=sc.sspice_et, gps_time=sc.sspice_gps, utc_time=sc.sc_utc
+            )
 
             tba = tba_pairwise_numba(sc.state_ecef[:, 0:3], r_pos, solarsys_env.GM)
             acc_dict[sc_id] = tba
 
         return acc_dict
 
-    def potential(self,
-                  constellation: Constellation
-                  ) -> dict[str, npt.NDArray[np.float64]]:
+    def potential(
+        self, constellation: Constellation
+    ) -> dict[str, npt.NDArray[np.float64]]:
         """Not implemented for ThirdBodyAcc, only acceleration is calculated."""
         raise NotImplementedError("Not implemented for ThirdBodyAcc.")

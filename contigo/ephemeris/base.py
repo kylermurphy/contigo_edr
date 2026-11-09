@@ -10,6 +10,7 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+
 @runtime_checkable
 class EphemerisProvider(Protocol):
     """
@@ -28,12 +29,13 @@ class EphemerisProvider(Protocol):
     - Keeps batch/vectorization decisions inside provider
     """
 
-    def __call__(self,
-                 body: list[str],
-                 utc_time: np.ndarray | None = None,
-                 gps_time: None = None,
-                 ephem_time: None = None,
-                ) -> np.ndarray:
+    def __call__(
+        self,
+        body: list[str],
+        utc_time: np.ndarray | None = None,
+        gps_time: None = None,
+        ephem_time: None = None,
+    ) -> np.ndarray:
         """
         Compute positions of celestial bodies.
 
@@ -54,7 +56,7 @@ class EphemerisProvider(Protocol):
         Notes:
         ------
         - The provider can choose to use any combination of time inputs
-          (ephem_time, gps_time, utc_time) as needed for its internal 
+          (ephem_time, gps_time, utc_time) as needed for its internal
           logic.
         """
         ...

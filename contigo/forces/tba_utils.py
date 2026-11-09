@@ -6,6 +6,7 @@ added: 17/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 from math import sqrt
+
 import numba
 import numpy as np
 
@@ -15,7 +16,7 @@ def tba_pairwise_numba(r_sat, r_bodies, mu_bodies):
     """Per-body third-body acceleration.
 
     Units should be consistent across positions and Mass parameters.
-    
+
     Parameters
     ----------
     r_sat : (N,3) array
@@ -48,11 +49,11 @@ def tba_pairwise_numba(r_sat, r_bodies, mu_bodies):
             dy = by - sy
             dz = bz - sz
 
-            rho2 = dx*dx + dy*dy + dz*dz
-            rb2  = bx*bx + by*by + bz*bz
+            rho2 = dx * dx + dy * dy + dz * dz
+            rb2 = bx * bx + by * by + bz * bz
 
             inv_rho3 = 1.0 / (sqrt(rho2) * rho2)
-            inv_rb3  = 1.0 / (sqrt(rb2)  * rb2)
+            inv_rb3 = 1.0 / (sqrt(rb2) * rb2)
 
             mu = mu_bodies[b]
 
