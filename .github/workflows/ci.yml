@@ -1,0 +1,71 @@
+# CONTIGO continuous integration (docs/phase0_plan.md, task 0.5a).
+#
+# lint : ruff + black on the code that is held to the lint standard. The rest
+#        of contigo/ joins after the mechanical clean-up PR (refactor R13).
+# test : non-editable install, then the fast pytest tier on every supported
+#        Python. Tests marked network/orekit/slow are skipped (see
+#        tests/conftest.py). Installing non-editable means the tests exercise
+#        the built package, so missing subpackages or data files fail here.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # stop SPICE kernel / Orekit data refresh checks once R11 adds the switch
+  CONTIGO_OFFLINE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff black
+      - name: ruff
+        run: ruff check tests
+      - name: black
+        run: black --check tests
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install (non-editable) with test and plot extras
+        run: pip install ".[test,plot]"
+      - name: Check the installed package, not the source tree, is imported
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'EOF'
+          import pathlib
+          import contigo, contigo.forces, contigo.ephemeris, contigo.contigo_utils
+          import contigo.config as config
+          assert "site-packages" in contigo.__file__, contigo.__file__
+          data = pathlib.Path(config.DATA_DIR)
+          for f in ["naif0012.tls", "earth_latest_high_prec.bpc",
+                    "de440s.bsp", "EIGEN-2.gfc"]:
+              assert (data / f).is_file(), f"missing bundled file {f}"
+          print("installed package OK:", contigo.__file__)
+          EOF
+      - name: pytest (fast tier)
+        run: pytest --cov=contigo --cov-report=term-missing:skip-covered

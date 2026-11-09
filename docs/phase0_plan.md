@@ -80,6 +80,8 @@ These affect Phase 0 directly. Each one links to a test or refactor ID.
 | F13 | ruff config uses the deprecated top-level `select`. The existing code has never been linted, so a strict `ruff check contigo` will start red | `pyproject.toml` | 0.5a, R13 |
 | F14 | `forces/__init__.py` has the third-body module docstring pasted in | `forces/__init__.py` | R12 |
 | F15 | `time_utils.spice_time` does not upper-case `out_scale` and loops over `unitim` element by element | `time_utils.py` | TU-03, R10 |
+| F16 | Downloads (Orekit data, ICGEM `.gfc`, SPICE kernels) are written to `contigo/data`. In a non-editable install that is inside site-packages, which can be read-only and is wiped on upgrade | `config.py` | R16 |
+| F17 | The `orekit` extra is a direct `git+https` URL, which PyPI rejects on upload. It is probably redundant because `start_orekit()` downloads the data itself | `pyproject.toml` | R16 |
 
 ---
 
@@ -103,13 +105,12 @@ These affect Phase 0 directly. Each one links to a test or refactor ID.
 
 | Job | Python | Steps |
 |-----|--------|-------|
-| `lint` | 3.12 | `ruff check contigo tests`, `black --check contigo tests` |
-| `test` | 3.10, 3.12, 3.13, 3.14 | `pip install ".[dev,plot]"`, `pytest --cov=contigo` (fast tier only; `CONTIGO_OFFLINE=1`) |
-| `install` | 3.12 | non-editable `pip install .` + `python -c "import contigo.forces, contigo.ephemeris"` (PK-02) |
+| `lint` | 3.12 | `ruff check` + `black --check` on `tests/` (and `contigo/plotting/` once 0.4 adds it) |
+| `test` | 3.10, 3.12, 3.13, 3.14 | **non-editable** `pip install ".[test,plot]"`; from outside the repo, check that the installed package (not the source tree) imports and has its bundled data (PK-02); then `pytest --cov=contigo` (fast tier only; `CONTIGO_OFFLINE=1`) |
 
-- **ruff on existing code [PROPOSED]:** CI lints `tests/` and `contigo/plotting/` strictly from day one. The rest of the package goes into a per-file `extend-exclude` list, which R13 (a mechanical `ruff --fix` PR) empties.
+- **ruff on existing code [DECISION, as built]:** CI lints only the paths named in the `lint` job. R13 (a mechanical `ruff --fix` + `black` PR, 55 ruff findings and 23 files to reformat at the time of writing) then adds `contigo/` to the job. This is simpler than a per-file exclude list.
 - Orekit is a core dependency (P9), so CI installs the `jdk4py` JDK wheel but the fast tier never starts the JVM.
-- 3.13/3.14: if a dependency (numba, pyshtools, jdk4py) has no wheel yet for a version, that matrix entry is temporarily marked `continue-on-error` and noted in the PR. It is not silently dropped.
+- 3.13/3.14: checked on 2026-11-09. Linux wheels exist for numba, llvmlite, pyshtools, tables, jpype1, spiceypy, jdk4py, orekit-jpype and scipy on 3.10 to 3.14, so every matrix entry is required (no `continue-on-error`).
 - Cache pip, and set `timeout-minutes: 15`.
 
 **Acceptance:** a PR shows green or red checks; branch protection (plotting plan §5.4) requires `lint` and `test`.
@@ -277,6 +278,7 @@ Each refactor lands **after** the tests that cover it, in its own PR, and remove
 | R11 | `CONTIGO_OFFLINE=1` env switch read in `config`: skips the NAIF mtime check and the GitLab SHA query, using local files | High | CI determinism, Colab cold start |
 | R12 | Fix the `forces/__init__.py` docstring; add `contigo.__version__` | Low | |
 | R13 | Mechanical `ruff --fix` + `black` over `contigo/`, then empty the ruff exclude list | Medium (separate PR, no logic changes) | strict lint |
+| R16 | Writable data goes to a per-user cache dir (`platformdirs`), with bundled read-only files still read from the package; drop or replace the `git+https` `orekit` extra (F16, F17) | Medium, after R2/R5 (same code paths) | PyPI release, read-only installs |
 | ~~R14~~ | ~~Move Orekit to an extra~~: **dropped**, Orekit stays core (P9) | | |
 | R15 | **Remove GMAT** (P10, Kyle's call). Scope: `forces/srp_gmat.py` (`SRPAcc`, `SRPGMATAcc`), `forces/srp_utils.py`, `config.state['gmat_loaded'/'gmatpy']`, GMAT references in README/CLAUDE.md, and the GMAT install cells in `CONTIGO_Colab` (which would switch to `SRPOrekitCB` or be merged into `Tutorial_Overview`). Path: `DeprecationWarning` on `SRPAcc` in 0.2.0, removal in 0.3.0, same as R9 | **ToDo**, after Phase 0 | simpler install, fewer tutorials |
 
