@@ -264,7 +264,7 @@ EDR must stay at zero.
 | PK-01 | Import every submodule (`pkgutil.walk_packages`) | no import starts the JVM (`jpype.isJVMStarted()` stays False). `srp_orekit` is **xfail** until R3 |
 | PK-02 | CI `install` job | non-editable install imports and finds data and the jar |
 | PK-03 | `orekit`: `start_orekit()` starts the JVM and sets `config.state['orekit_loaded']` (`testing_champ` cell 3) | JVM running afterwards |
-| NB-01 | Every `from contigo... import X` in `notebooks/tutorials/*.ipynb` resolves (static parse, no execution) | catches F9-type breakage. `CONTIGO_Colab` is **xfail** until N2 |
+| NB-01 | Every `from contigo... import X` in `notebooks/tutorials/*.ipynb` resolves (static parse, no execution) | catches F9-type breakage. `CONTIGO_Colab` xfail removed with N2 |
 
 ### 4.8 Out of scope for Phase 0 (later)
 
@@ -340,19 +340,19 @@ Each refactor lands **after** the tests that cover it, in its own PR, and remove
 | ~~R14~~ | ~~Move Orekit to an extra~~: **dropped**, Orekit stays core (P9) | | |
 | R15 | **Remove GMAT** (P10, Kyle's call). Scope: `forces/srp_gmat.py` (`SRPAcc`, `SRPGMATAcc`), `forces/srp_utils.py`, `config.state['gmat_loaded'/'gmatpy']`, GMAT references in README/CLAUDE.md, and the GMAT install cells in `CONTIGO_Colab` (which would switch to `SRPOrekitCB` or be merged into `Tutorial_Overview`). Path: `DeprecationWarning` on `SRPAcc` in 0.2.0, removal in 0.3.0, same as R9 | **ToDo**, after Phase 0 | simpler install, fewer tutorials |
 
-### 5.1 Notebook layout **[PROPOSED]**
+### 5.1 Notebook layout **[DONE]** (branch `chore/notebooks-cleanup`; layout below as built, the table is the original proposal)
 
 ```
 notebooks/
   tutorials/        # maintained, Colab badges, small outputs only
     Tutorial_Overview.ipynb        (main entry point)
-    CONTIGO_Colab.ipynb            (GMAT + SPICE route; fix F9)
+    CONTIGO_Colab.ipynb            (GMAT + SPICE route; F9 fixed by N2)
     Orekit_EDR.ipynb               (Orekit route)
     Plotting_Examples.ipynb        (Phase 1 of plotting plan)
   analysis/         # science notebooks, may need external data
     champ_stats.ipynb
   dev/              # archived; outputs cleared; header cell says "archived, see tests/..."
-    ...testing_* that are not fully covered
+    testing_forces, testing_swarm, testing_champ
 ```
 
 | Notebook | Size | Proposed fate (confirmed after mining, §6.2) |
@@ -366,9 +366,9 @@ notebooks/
 | `testing_swarm`, `testing_champ` | 644 / 442 KB | science validation with `D:\` data → **archive** |
 | `champ_stats` | 197 KB | → `analysis/` |
 
-- N1: move the tutorials; update Colab badge URLs (`.../blob/main/notebooks/tutorials/...`) and README links.
-- N2: fix `CONTIGO_Colab` imports and `SolarSystemEnvironment` kwargs only (minimal, since R15 may rewrite or retire it). Kyle re-runs it in Colab, since it needs GMAT.
-- N3: **[PROPOSED]** add `nbstripout` as a pre-commit hook, or at least a CI check that notebooks in `tutorials/` are under 1 MB.
+- N1: **Done.** Tutorials moved to `notebooks/tutorials/`, `champ_stats` to `notebooks/analysis/`, the three archived notebooks to `notebooks/dev/` (outputs cleared, header cell added), the five covered notebooks deleted (§4.9), Colab badges now point at `.../blob/main/notebooks/tutorials/...`. `Orekit_EDR` downloads `EIGEN-2.gfc` from `contigo/data/`; the duplicate `data/EIGEN-2.gfc` was removed (R2 still open for the download-on-demand registry). The README has no notebook section.
+- N2: **Done (minimal fix); Colab re-run pending (Kyle).** Dropped the `ThirdBody`/`ThirdBodyAcc` imports, `SolarSystemEnvironment` now gets `ephem_time=`/`gps_time=`/`utc_time=`, `Constellation(..., unit_input='km')` for the km POD file and the Orekit comparison is no longer divided by `1000**2` (SI on both sides). Outputs cleared. It needs GMAT, so Kyle must re-run it in Colab.
+- N3: **Done.** `tests/test_notebooks_size.py` asserts every notebook in `notebooks/tutorials/` is under 1 MB and that no `.ipynb` is left in the repo root. (`nbstripout` as a pre-commit hook remains optional.)
 
 ---
 
