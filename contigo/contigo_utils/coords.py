@@ -113,6 +113,8 @@ def _transform(
         raise ValueError(f"et must have shape ({state.shape[0]},); got {et.shape}.")
     if not np.all(np.isfinite(et)):
         raise ValueError("et contains NaN or inf.")
+    if state.shape[0] == 0:
+        return state.copy()  # nothing to rotate; no kernels needed
 
     frame = kernels.check_pck(et, fallback=fallback)
     src, dst = (frame, _INERTIAL_FRAME) if to_inertial else (_INERTIAL_FRAME, frame)

@@ -1,4 +1,4 @@
-"""Tests for ``contigo.contigo_utils.coords`` (CD-01 .. CD-05, FX-01 .. FX-08).
+"""Tests for ``contigo.contigo_utils.coords`` (CD-01 .. CD-05, FX-01 .. FX-10).
 
 Geodetic expectations come from the WGS-84 definition (a, 1/f) and its derived
 semi-minor axis b = a(1 - f). Frame expectations come from Earth's rotation
@@ -176,3 +176,32 @@ def test_fx08_iau_earth_is_close_in_covered_range(offline):
     approx = np.einsum("ij,j->i", spice.sxform("IAU_EARTH", "J2000", ET_2018), st[0])
     assert np.linalg.norm(approx[:3] - good[0, :3]) < 20e3
     assert np.linalg.norm(approx[3:] - good[0, 3:]) < 20.0
+
+
+@pytest.mark.parametrize("width", [3, 6])
+def test_fx09_empty_input_returns_empty(width):
+    """FX-09: zero epochs in, zero epochs out (no reduction-of-empty error)."""
+    out = ecef_to_inertial(np.zeros((0, width)), np.zeros(0))
+    assert out.shape == (0, width)
+    assert inertial_to_ecef(out, []).shape == (0, width)
+    assert kernels.check_pck([]) == "ITRF93"
+
+
+def test_fx10_fallback_warning_points_at_the_caller(offline):
+    """FX-10: the IAU_EARTH warning names the caller's file, not contigo's."""
+    with pytest.warns(RuntimeWarning, match="IAU_EARTH") as rec:
+        ecef_to_inertial(np.zeros((1, 3)), [ET_2026_09])
+    assert rec[0].filename == __file__
+
+
+def test_fx10b_fallback_warning_from_interactive_code(offline):
+    """FX-10: code typed at a prompt (file name ``<stdin>``) counts as the caller."""
+    code = compile(
+        "ecef_to_inertial(np.zeros((1, 3)), [ET_2026_09])", "<stdin>", "exec"
+    )
+    with pytest.warns(RuntimeWarning, match="IAU_EARTH") as rec:
+        exec(
+            code,
+            {"ecef_to_inertial": ecef_to_inertial, "np": np, "ET_2026_09": ET_2026_09},
+        )
+    assert rec[0].filename == "<stdin>"

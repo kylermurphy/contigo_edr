@@ -7,8 +7,9 @@ Shared by ``SPICEEphem`` and ``time_utils.check_lpsk``.
   ``config.find_data_file(name, "spice")`` (per-user cache first, then the
   bundled ``DATA_DIR``). A missing kernel, or (online, when asked) a NAIF copy
   newer than the local file, is downloaded into ``config.cache_dir("spice")``;
-  ``DATA_DIR`` is never written to. Offline there is no freshness check and a
-  missing kernel raises ``config.OfflineError``.
+  ``DATA_DIR`` is never written to. A download goes to a ``.part`` file and
+  replaces the cached kernel only when complete. Offline there is no
+  freshness check and a missing kernel raises ``config.OfflineError``.
 - :func:`furnsh_kernel`: load a kernel once. Loaded kernels are compared by
   ``os.path.normcase(os.path.realpath(p))``; a loaded kernel with the same
   file name at another path is unloaded first, so a stale copy and its
@@ -23,8 +24,10 @@ added: 09/11/2026 Claude Code
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import sys
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +60,32 @@ IAU_EARTH = "IAU_EARTH"
 
 #: Errors that mean "could not get a newer kernel"; callers log and carry on
 NET_ERRORS = (config.OfflineError, requests.exceptions.RequestException, OSError)
+
+#: The ``contigo`` package directory, used to point warnings at the user's code
+_PKG_DIR = os.path.normcase(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _external_stacklevel() -> int:
+    """``stacklevel`` for ``warnings.warn`` that names the first caller outside contigo.
+
+    Call it from the function that calls ``warnings.warn``. However deep the
+    call chain inside contigo (``check_pck`` from ``coords``, from a plot
+    function, ...), the warning then shows the user's line, and Python's
+    once-per-location filter works per user call site.
+    """
+    level = 1
+    frame = sys._getframe(1)  # the function that will call warnings.warn
+    while frame is not None:
+        raw = frame.f_code.co_filename
+        if raw.startswith("<"):  # <stdin>, <ipython-input-...>: user code
+            break
+        if not os.path.normcase(os.path.abspath(raw)).startswith(_PKG_DIR + os.sep):
+            break
+        frame = frame.f_back
+        level += 1
+    if frame is None:  # every frame is inside contigo: name the outermost one
+        level -= 1
+    return level
 
 
 def kernel_kind(name: str) -> str:
@@ -103,13 +132,16 @@ def is_loaded(name: str) -> bool:
     return any(_basename(k) == want for k in loaded_kernels())
 
 
-def _unload_path(path: str | os.PathLike) -> None:
-    """Unload every pool entry that is the file ``path``."""
+def _unload_path(path: str | os.PathLike) -> bool:
+    """Unload every pool entry that is the file ``path``; True if any was."""
     want = _norm(path)
+    found = False
     for k in loaded_kernels():
         if _norm(k) == want:
             logger.info("Unloading kernel - %s", k)
             spice.unload(k)
+            found = True
+    return found
 
 
 def _mtime_utc(path: str | os.PathLike) -> datetime:
@@ -117,11 +149,46 @@ def _mtime_utc(path: str | os.PathLike) -> datetime:
 
 
 def _download(url: str, target: Path) -> Path:
-    # a binary kernel stays open while loaded: release it before overwriting
-    if target.exists():
-        _unload_path(target)
+    """Download ``url`` to ``target`` without ever leaving a partial file there.
+
+    The kernel is written to a per-process ``.part`` file next to ``target``,
+    its size is checked against the server's ``Content-Length`` (when known),
+    and only then is it moved into place with ``os.replace``. If the download
+    fails, ``target`` and any loaded copy of it are left as they were, so a
+    cut-off transfer cannot leave a truncated kernel in the cache.
+
+    Raises
+    ------
+    config.OfflineError
+        If ``CONTIGO_OFFLINE`` is set.
+    requests.exceptions.RequestException
+        On a network or HTTP error.
+    OSError
+        If the download is shorter than the server said, or on a file error.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = target.with_name(f"{target.name}.{os.getpid()}.part")
     logger.info("Downloading kernel %s to %s", url, target)
-    utils.dl_file(url, str(target))  # raises config.OfflineError when offline
+    try:
+        expected = utils.dl_file(url, str(part))  # OfflineError when offline
+        # 0 or None means the size is unknown (no Content-Length, or compressed)
+        if expected:
+            got = part.stat().st_size
+            if got != expected:
+                raise OSError(
+                    f"Incomplete download of {url}: {got} of {expected} bytes"
+                )
+        # a binary kernel stays open while loaded (Windows cannot replace it)
+        was_loaded = target.exists() and _unload_path(target)
+        try:
+            os.replace(part, target)
+        except OSError:
+            if was_loaded:  # keep the old kernel in the pool
+                spice.furnsh(str(target))
+            raise
+    finally:
+        with contextlib.suppress(OSError):
+            part.unlink(missing_ok=True)
     return target
 
 
@@ -134,7 +201,8 @@ def ensure_kernel(name: str, check_remote: bool = True) -> Path:
         Kernel file name, e.g. ``"naif0012.tls"``.
     check_remote : bool
         If True and not offline, download the NAIF copy when it is newer than
-        the local file (``utils.wf_mtime``).
+        the local file (``utils.wf_mtime``). If that download fails, the
+        local file is returned (and the failure logged as a warning).
 
     Returns
     -------
@@ -162,7 +230,12 @@ def ensure_kernel(name: str, check_remote: bool = True) -> Path:
         logger.info("Could not determine modification time of %s", url)
     elif mod_url > _mtime_utc(local):
         logger.info("NAIF has a newer version of %s", name)
-        return _download(url, target)
+        try:
+            return _download(url, target)
+        except NET_ERRORS as exc:
+            logger.warning(
+                "Could not download the newer %s (%s); using %s", name, exc, local
+            )
     return local
 
 
@@ -259,6 +332,8 @@ def check_pck(
     if et is None:
         return ITRF93
     et = np.asarray(et, dtype=float)
+    if et.size == 0:
+        return ITRF93
     et_min, et_max = float(et.min()), float(et.max())
     if pck_covers(et_min, et_max):
         return ITRF93
@@ -281,7 +356,7 @@ def check_pck(
     warnings.warn(
         msg + " Using low-precision IAU_EARTH (position error of order 10 km).",
         RuntimeWarning,
-        stacklevel=3,
+        stacklevel=_external_stacklevel(),
     )
     furnsh_kernel(ensure_kernel(config.TPC_FILE, check_remote=False))
     return IAU_EARTH
