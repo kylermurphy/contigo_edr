@@ -97,19 +97,26 @@ def test_tu03_lowercase_tscale_is_accepted():
     assert out[0] == pytest.approx(51.184, abs=2e-3)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValueError,
-    reason="F15/R10: out_scale is not upper-cased",
-)
 def test_tu03_lowercase_out_scale_is_accepted():
     """TU-03: lower-case ``out_scale`` is accepted (DECISION 3, R10).
 
-    Expected value as TU-01. Currently only ``tscale`` is upper-cased, so
-    ``'et'`` raises ``ValueError``.
+    Expected value as TU-01.
     """
     out = spice_time(J2000, "GPS", "et")
     assert out[0] == pytest.approx(51.184, abs=2e-3)
+
+
+def test_tu03_utc_to_utc_returns_seconds_past_j2000():
+    """TU-03: UTC -> UTC (F25) returns calendar seconds past J2000, no error.
+
+    Source: 2000-01-02 12:00:00 is exactly 86400 s after the J2000 epoch; with
+    no scale change the leap seconds are not counted. Lower-case is accepted.
+    """
+    times = pd.DatetimeIndex(["2000-01-01 12:00:00", "2000-01-02 12:00:00"])
+    for out_scale in ("UTC", "utc"):
+        out = spice_time(times, "UTC", out_scale)
+        assert out.shape == (2,)
+        assert out == pytest.approx([0.0, 86400.0], abs=1e-9)
 
 
 @pytest.mark.parametrize("tscale", ["GPS", "TAI", "ET", "TDB"])
