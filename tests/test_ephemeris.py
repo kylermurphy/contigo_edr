@@ -1,6 +1,6 @@
 """Tests for the ephemeris providers ``SPICEEphem`` and ``OrekitEphem`` (PR T3).
 
-Rows EP-01, EP-02, EP-03, EP-06 and EP-06b of docs/phase0_plan.md section 4.4.
+Rows EP-01, EP-02, EP-03, EP-06 and EP-06b of docs/testing.md.
 The ``SolarSystemEnvironment`` rows (EP-01b, EP-04, EP-05) are in
 ``test_solar_system_env.py``.
 

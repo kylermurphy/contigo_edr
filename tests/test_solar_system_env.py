@@ -1,6 +1,6 @@
 """Tests for ``SolarSystemEnvironment``, the cached ephemeris container (PR T3).
 
-Rows EP-01b, EP-04 and EP-05 of docs/phase0_plan.md section 4.4. The cache is
+Rows EP-01b, EP-04 and EP-05 of docs/testing.md. The cache is
 exercised with ``FakeProvider`` (counts calls, records requested ET); EP-01b
 uses the real ``SPICEEphem`` with the bundled kernels.
 

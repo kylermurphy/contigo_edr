@@ -19,10 +19,10 @@ Orekit is a core dependency; `orekit_utils.start_orekit()` downloads the Orekit 
 
 ```bash
 # Format
-black contigo/
+black contigo tests
 
 # Lint
-ruff check contigo/
+ruff check contigo tests
 
 # Type check
 mypy contigo/
@@ -41,8 +41,18 @@ pytest --run-all
 ```
 
 The default (fast) tier must not touch the network or start the JVM. Mark such tests
-`@pytest.mark.network`, `@pytest.mark.orekit` or `@pytest.mark.slow`. The plan for the
-test suite and Phase 0 work is in `docs/phase0_plan.md`.
+`@pytest.mark.network`, `@pytest.mark.orekit` or `@pytest.mark.slow`. Test tiers, fixtures,
+the test-ID catalogue and the glossary of plan IDs (F21, R7, ...) seen in test docstrings are
+in `docs/testing.md`.
+
+## Docs
+
+- `README.md`: overview and quick example. `CHANGELOG.md`: user-visible changes (add a line
+  under the unreleased version). `CONTRIBUTING.md`: setup, branch/PR workflow, style.
+- `docs/installation.md` (install, bundled vs downloaded data, cache, offline/HPC),
+  `docs/coordinates.md`, `docs/force_models.md`, `docs/testing.md`.
+- `docs/plotting_plan.md`: the plotting work plan (Phase 1 onward). `docs/ToDo.md`: open work
+  not yet in a plan (GMAT removal, 0.3.0 removals, coastline packaging, ...).
 
 ## Java Backend (Orekit utilities)
 
@@ -66,7 +76,7 @@ The framework has four layers that compose top-to-bottom:
 
 ### Environment Layer
 - **`EphemerisProvider`** (`ephemeris/base.py`) — a `Protocol` (`__call__`) that any ephemeris backend must satisfy. Returns `(n_bodies, N, 3)` position arrays.
-  - **`SPICEEphem`** — uses `spiceypy`. Loads SPICE kernels on init; kernels are cached in `contigo/data/`.
+  - **`SPICEEphem`** — uses `spiceypy`. Loads SPICE kernels on init through `contigo_utils/kernels.py`: bundled copies in `contigo/data/`, newer NAIF copies downloaded into `config.cache_dir("spice")` (checked once per session).
   - **`OrekitEphem`** — uses `orekit_jpype` (JVM). Defers all Java imports until after the JVM starts. Uses `EphemerisBatchHelper` from the JAR.
 - **`SolarSystemEnvironment`** (`solar_system_ephem.py`) — wraps an `EphemerisProvider` with an O(1) time-quantization cache. Times are binned by `np.round(t / tolerance).astype(int)`. Only missing bins trigger a provider call. `EDRDensity` pre-loads all constellation epochs during `__init__`.
 
@@ -75,7 +85,12 @@ The framework has four layers that compose top-to-bottom:
   - `acceleration(constellation, solarsys_env) → dict[sc_id, ndarray]` — shape `(N,3)` or `(n_bodies, N, 3)` for multi-body forces
   - `potential(constellation) → dict[sc_id, ndarray]` — shape `(N,)`, used only for the gravity potential
 
-  Implementing this protocol is all that's needed to add a new force to the EDR computation. Concrete implementations: `ThirdBodyEnv`, `SRPAcc` (GMAT or Orekit cannonball), `EarthPotential` (pyshtools + ICGEM `.gfc` gravity field files).
+  Implementing this protocol is all that's needed to add a new force to the EDR computation. Concrete implementations: `ThirdBodyEnv`, `SRPOrekitCB` (Orekit cannonball SRP), `SRPAcc` (GMAT SRP; likely to be removed, see `docs/ToDo.md`), `EarthPotential` (pyshtools + ICGEM `.gfc` gravity field files). `ThirdBodyAcc` is deprecated (removed in 0.3.0). See `docs/force_models.md`.
+
+### Utilities and plotting
+- **`contigo_utils/coords.py`** — `ecef_to_geodetic` / `geodetic_to_ecef` (WGS-84, pure NumPy) and `ecef_to_inertial` / `inertial_to_ecef` (SPICE `ITRF93`↔`J2000`, `(N,3)` or `(N,6)`; a Python loop over epochs, so decimate first). See `docs/coordinates.md`.
+- **`contigo_utils/kernels.py`** — `ensure_kernel` (cache, then bundled; atomic `.part` downloads into the cache), `furnsh_kernel` (load once by real path), `check_pck` (Earth orientation coverage; one NAIF update per session, else `RuntimeWarning` + `IAU_EARTH` fallback, ~10 km, or `RuntimeError` with `fallback="raise"`). The bundled `earth_latest_high_prec.bpc` ends 2026-05-30.
+- **`contigo/plotting/`** — `_util` (`as_spacecraft_dict`, `decimate`, `split_antimeridian`) and `_style` (`require_matplotlib`, `color_for`, `color_map`, `rc_context`). matplotlib is the optional `plot` extra, imported lazily. Public plot functions come with `docs/plotting_plan.md` Phase 1.
 
 ### Computation Layer
 - **`EDRDensity`** (`edr_efd.py`) — the core engine. Accepts a `Constellation`, a `SolarSystemEnvironment`, a list of `ForceModel` implementations, and a `potential_model`. Exposes:
@@ -88,12 +103,14 @@ The framework has four layers that compose top-to-bottom:
 `contigo/config.py` holds a mutable `state` dict that tracks loaded external resources:
 ```python
 state = {
-    'orekit_loaded': False,   # True after JVM started
-    'gmat_loaded': False,     # True after GMAT API loaded
-    'gmatpy': None,           # GMAT Python API module reference
-    'pot_coef_loaded': False, # True after gravity coefficients loaded
-    'pot_file': None,         # Path to the loaded .gfc file
-    'pot_clm': None, 'pot_slm': None, 'pot_r0': None, 'pot_GM': None,
+    'orekit_loaded': False,     # True after JVM started
+    'gmat_loaded': False,       # True after GMAT API loaded
+    'gmatpy': None,             # GMAT Python API module reference
+    'kernel_downloaded': False, # SPICEEphem did its once-per-session NAIF check
+    'pck_refreshed': False,     # check_pck tried its once-per-session PCK update
+    'pot_coef_loaded': False,   # True after gravity coefficients loaded
+    'pot_file': None,           # realpath of the loaded .gfc file
+    'pot_lmax': None, 'pot_clm': None, 'pot_slm': None, 'pot_r0': None, 'pot_GM': None,
 }
 ```
 Check `config.state['orekit_loaded']` before using any Orekit feature. `OrekitEphem.__init__` and Orekit SRP classes call `orekit_utils.start_orekit()` automatically if not yet started.
