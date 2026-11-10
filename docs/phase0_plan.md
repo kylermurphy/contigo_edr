@@ -322,7 +322,7 @@ Each refactor lands **after** the tests that cover it, in its own PR, and remove
 | ID | Change | Priority | Unblocks |
 |----|--------|----------|----------|
 | R1 | Unstage the big `.gfc` files (Kyle) | **Now** | pushing |
-| R2 | ICGEM download on demand: a small registry `{name: url}` in `grav_utils`; `GravPot` downloads into `DATA_DIR` when the file is missing; delete the duplicate `data/EIGEN-2.gfc` | High | P1 |
+| R2 | ICGEM download on demand: a small registry `{name: url}` in `grav_utils`; `GravPot` downloads into `DATA_DIR` when the file is missing; delete the duplicate `data/EIGEN-2.gfc` | **Done** (PR `feat/r2-icgem-download`): `grav_utils.ICGEM_MODELS` (url, size, sha256, lmax), `fetch_icgem` and `resolve_pot_file`, `PotentialFileNotFound`; downloads go to `cache_dir("gravity")` per P13 (not `DATA_DIR`), verified and moved into place atomically; offline raises. Registry size/sha256 are those of the LF-ending files ICGEM serves. Deleting `data/EIGEN-2.gfc` and the notebook updates are left to a separate PR | P1 |
 | R3 | `srp_orekit.py` **and `jb08_utils.py` (F24)**: move the JVM start and Java imports into the class/function that needs them (same pattern as `OrekitEphem`) | High | PK-01, CI |
 | R4 | `config.py`: drop `logging.basicConfig`; replace `print` with `logger` | **Done** (PR `feat/r11-offline-cache`: `basicConfig` removed and no handler added, so warnings still reach stderr via `lastResort`; `print` to `logger` still open) | |
 | R5 | `orekit_utils`: jar via `importlib.resources`; if GitLab is unreachable, use the newest local `orekit_data_*.zip`; raise instead of returning an error string on 404; untrack `contigo/data/orekit_data_*.zip` (add to `.gitignore`) | High | non-editable install, offline use |

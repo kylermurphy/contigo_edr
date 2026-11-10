@@ -3,12 +3,220 @@ Utilities for deriving gravitational potential.
 
 Uses numba and jit to perform faster calculations of gravitational potential.
 
+Also holds the registry of ICGEM gravity-field models that are downloaded on
+demand (:data:`ICGEM_MODELS`, :func:`fetch_icgem`, :func:`resolve_pot_file`).
+
 added: 03/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+from pathlib import Path
+from typing import NamedTuple
 
 import numba
 import numpy as np
 import pyshtools
+
+import contigo.config as config
+from contigo.contigo_utils import utils
+
+logger = logging.getLogger(__name__)
+
+
+class IcgemModel(NamedTuple):
+    """An ICGEM gravity-field model that can be downloaded on demand.
+
+    ``size`` (bytes) and ``sha256`` are checked after download when not None.
+    ``lmax`` must equal the ``max_degree`` header of the file.
+    """
+
+    url: str
+    size: int | None
+    sha256: str | None
+    lmax: int
+
+
+_ICGEM = "https://icgem.gfz.de/getmodel/gfc/"
+
+#: Downloadable ICGEM models, keyed by file name. EIGEN-2.gfc is also bundled
+#: with the package; the registry entry is used by the network tests.
+ICGEM_MODELS: dict[str, IcgemModel] = {
+    "EGM2008.gfc": IcgemModel(
+        url=_ICGEM
+        + "c50128797a9cb62e936337c890e4425f03f0461d7329b09a8cc8561504465340"
+        + "/EGM2008.gfc",
+        size=252140870,
+        sha256="ab5b524da073e63b5bdceb7ca47a0de07a26dd44a1c5798f39fc98dc80af70fd",
+        lmax=2190,
+    ),
+    "EIGEN-6C4.gfc": IcgemModel(
+        url=_ICGEM
+        + "7fd8fe44aa1518cd79ca84300aef4b41ddb2364aef9e82b7cdaabdb60a9053f1"
+        + "/EIGEN-6C4.gfc",
+        size=177702723,
+        sha256="2ac274a66a25fb25bdddcec7074669867939345ad003bbc1ece3967450d48dc1",
+        lmax=2190,
+    ),
+    "EIGEN-2.gfc": IcgemModel(
+        url=_ICGEM
+        + "4dbcdba7387ea4621f5306a55e91f82e346242791f23a4912b18fc40effdca4e"
+        + "/EIGEN-2.gfc",
+        size=None,
+        sha256=None,
+        lmax=140,
+    ),
+}
+
+
+class PotentialFileNotFound(FileNotFoundError, ValueError):
+    """A gravity-field (potential) file is missing and cannot be downloaded.
+
+    Subclasses ``ValueError`` so existing ``except ValueError`` code keeps
+    working.
+    """
+
+
+def _sha256(path: Path, chunk: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _read_icgem_header(path: Path, encoding: str = "ISO-8859-1") -> dict:
+    """Return the ICGEM header keywords (up to ``end_of_head``) of a file."""
+    head: dict[str, str] = {}
+    with open(path, "r", encoding=encoding) as fh:
+        for line in fh:
+            parts = line.split()
+            if not parts:
+                continue
+            if parts[0] == "end_of_head":
+                break
+            head[parts[0]] = parts[1] if len(parts) > 1 else ""
+    return head
+
+
+def _verify_icgem(path: Path, model: IcgemModel, name: str) -> None:
+    """Raise IOError if ``path`` does not match the registry entry."""
+    if model.size is not None:
+        size = path.stat().st_size
+        if size != model.size:
+            raise IOError(
+                f"Downloaded {name} has {size} bytes, expected {model.size} "
+                f"(from {model.url})"
+            )
+    if model.sha256 is not None:
+        digest = _sha256(path)
+        if digest != model.sha256:
+            raise IOError(
+                f"Downloaded {name} has sha256 {digest}, expected {model.sha256} "
+                f"(from {model.url})"
+            )
+    head = _read_icgem_header(path)
+    if "modelname" not in head:
+        raise IOError(f"Downloaded {name} has no 'modelname' header (from {model.url})")
+    try:
+        lmax = int(head.get("max_degree", ""))
+    except ValueError:
+        lmax = None
+    if lmax != model.lmax:
+        raise IOError(
+            f"Downloaded {name} has max_degree {head.get('max_degree')}, expected "
+            f"{model.lmax} (from {model.url})"
+        )
+
+
+def fetch_icgem(name: str, dest_dir: str | os.PathLike | None = None) -> Path:
+    """Download a registered ICGEM gravity-field file and return its path.
+
+    Use it to prefetch a model (for example on an HPC login node before
+    running offline on compute nodes). The file is written to
+    ``dest_dir`` (default ``config.cache_dir("gravity")``) via a temporary
+    ``<name>.<pid>.part`` file, verified (size and sha256 when known in
+    :data:`ICGEM_MODELS`, ``max_degree`` and ``modelname`` headers) and then
+    moved into place atomically. An existing file is overwritten.
+
+    Parameters
+    ----------
+    name : str
+        A key of :data:`ICGEM_MODELS`, e.g. ``"EGM2008.gfc"``.
+    dest_dir : str or path-like, optional
+        Target directory, by default the per-user gravity cache.
+
+    Returns
+    -------
+    Path
+        Path of the downloaded file.
+
+    Raises
+    ------
+    PotentialFileNotFound
+        If ``CONTIGO_OFFLINE`` is set (nothing is downloaded).
+    KeyError
+        If ``name`` is not in the registry.
+    IOError
+        If the downloaded file fails verification (it is deleted).
+    """
+    model = ICGEM_MODELS[name]
+    target_dir = (
+        Path(dest_dir).expanduser()
+        if dest_dir is not None
+        else config.cache_dir("gravity", create=False)
+    )
+    if config.is_offline():
+        raise PotentialFileNotFound(
+            f"Potential file {name} cannot be found and CONTIGO_OFFLINE is set: "
+            f"it would be downloaded from {model.url} into {target_dir}. "
+            "unset CONTIGO_OFFLINE or pass an absolute path to an existing file."
+        )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    final = target_dir / name
+    part = target_dir / f"{name}.{os.getpid()}.part"
+    logger.info("Downloading %s from %s to %s", name, model.url, final)
+    try:
+        utils.dl_file(model.url, str(part))
+        _verify_icgem(part, model, name)
+        os.replace(part, final)
+    finally:
+        if part.exists():
+            part.unlink()
+    return final
+
+
+def resolve_pot_file(name: str | os.PathLike) -> Path:
+    """Find a potential file, downloading registered ICGEM models if needed.
+
+    1. :func:`contigo.config.find_data_file` (path as given; a bare name in
+       the current directory, the gravity cache, then the bundled data).
+    2. A bare file name that is a key of :data:`ICGEM_MODELS` is downloaded
+       with :func:`fetch_icgem`.
+    3. Otherwise :class:`PotentialFileNotFound` is raised. A missing path with
+       a directory part never triggers a download.
+    """
+    found = config.find_data_file(name, "gravity")
+    if found is not None:
+        return found
+    p = Path(name)
+    if len(p.parts) == 1 and not p.is_absolute() and p.name in ICGEM_MODELS:
+        return fetch_icgem(p.name)
+    if len(p.parts) == 1 and not p.is_absolute():
+        searched = [
+            str(Path.cwd() / p.name),
+            str(config.cache_dir("gravity", create=False) / p.name),
+            str(Path(config.DATA_DIR) / p.name),
+        ]
+    else:
+        searched = [str(p.expanduser())]
+    raise PotentialFileNotFound(
+        f"Potential file {name} cannot be found; searched: {', '.join(searched)}. "
+        f"Downloadable models: {', '.join(sorted(ICGEM_MODELS))}."
+    )
 
 
 def read_icgem_coeff(file_path: str, encoding: str = "ISO-8859-1"):
