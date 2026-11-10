@@ -6,7 +6,7 @@ NB-01  every ``from contigo... import X`` in the tutorial notebooks resolves,
        checked by parsing sources only: no contigo module is executed (only
        the lightweight package ``__init__`` files are, through ``find_spec``).
 
-Expected values: ``docs/phase0_plan.md`` sections 2 (F4, F9), 4.7 and R3.
+Expected values: ``docs/testing.md`` (catalogue and glossary: F4, F9, R3).
 
 added: 09/11/2026 Claude Code
 """

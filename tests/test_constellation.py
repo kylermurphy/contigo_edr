@@ -1,6 +1,6 @@
 """Tests for ``contigo.constellation.Constellation`` (PR T1, catalogue §4.2).
 
-Rows CO-01 to CO-04 of ``docs/phase0_plan.md``. Every test docstring starts with
+Rows CO-01 to CO-04 of ``docs/testing.md``. Every test docstring starts with
 its catalogue row ID and states where the expected numbers come from.
 
 added: 09/11/2026 Claude Code

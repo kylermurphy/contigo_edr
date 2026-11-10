@@ -1,6 +1,6 @@
 """Tests for ``contigo.spacecraft.Spacecraft`` (PR T1, catalogue §4.1).
 
-Rows SC-01 to SC-12 (plus SC-04b and SC-11b) of ``docs/phase0_plan.md``. Every
+Rows SC-01 to SC-12 (plus SC-04b and SC-11b) of ``docs/testing.md``. Every
 test docstring starts with its catalogue row ID and states where the expected
 numbers come from. Files are written to ``tmp_path``; nothing needs the network,
 the JVM or GMAT.

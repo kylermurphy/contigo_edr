@@ -1,4 +1,4 @@
-# CONTIGO continuous integration (docs/phase0_plan.md, task 0.5a).
+# CONTIGO continuous integration (see docs/testing.md).
 #
 # lint : ruff + black on the whole package and the tests.
 # test : non-editable install, then the fast pytest tier on every supported

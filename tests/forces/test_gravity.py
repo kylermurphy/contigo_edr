@@ -2,7 +2,7 @@
 
 Covers ``contigo.forces.grav_utils`` (ICGEM reader, scalar and batched
 spherical-harmonic potential), ``GravPot`` and the ``EarthPotential`` force
-model. Rows FO-04 to FO-08 and FO-13 of docs/phase0_plan.md §4.5.
+model. Rows FO-04 to FO-08 and FO-13 of docs/testing.md.
 
 Normalisation: pyshtools ``PlmBar`` uses 4pi ("geodesy") normalisation without
 the Condon-Shortley phase,

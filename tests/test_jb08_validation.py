@@ -6,7 +6,7 @@ that reached the JVM would fail with ``RuntimeError`` instead. A positive
 control checks that valid input does reach the (stubbed) Orekit start, so the
 ordering is really tested. Fast tier: no Java, no network.
 
-Expected values: ``docs/phase0_plan.md`` F24 and R3; the validation rules in
+Expected values: ``docs/testing.md`` (glossary: F24, R3); the validation rules in
 ``contigo/contigo_utils/jb08_utils.py`` (``_validate_geodetic`` and the
 checks at the top of ``jb2008_density``).
 

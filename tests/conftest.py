@@ -7,7 +7,7 @@ command-line flag is given (or ``--run-all``). Unmarked tests form the fast tier
 that CI runs: they must not touch the network or start the JVM. The
 ``_no_network`` guard enforces this for contigo's own download helpers.
 
-Fixtures (see docs/phase0_plan.md §4.0)
+Fixtures (see docs/testing.md)
 ---------------------------------------
 - ``circular_orbit``: factory for an exact circular Keplerian orbit in ECEF.
 - ``sc_single`` / ``sc_multi`` / ``constellation_fixture``: synthetic objects.
