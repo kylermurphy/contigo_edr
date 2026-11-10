@@ -61,7 +61,7 @@ jobs:
           import contigo.config as config
           assert "site-packages" in contigo.__file__, contigo.__file__
           data = pathlib.Path(config.DATA_DIR)
-          for f in ["naif0012.tls", "earth_latest_high_prec.bpc",
+          for f in ["naif0012.tls", "earth_latest_high_prec.bpc", "pck00011.tpc",
                     "de440s.bsp", "EIGEN-2.gfc"]:
               assert (data / f).is_file(), f"missing bundled file {f}"
           jar = pathlib.Path(contigo.__file__).parent / "java" / "orekit_utils-1.0.0.jar"

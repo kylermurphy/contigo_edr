@@ -99,6 +99,7 @@ def find_data_file(name: str | os.PathLike, sub: str = "") -> Path | None:
 DATA_DIR = data_path()
 LEAP_FILE = "naif0012.tls"
 PCK_FILE = "earth_latest_high_prec.bpc"
+TPC_FILE = "pck00011.tpc"  # text PCK with the IAU Earth constants (IAU_EARTH frame)
 
 # Mutable State Values
 state = {
@@ -106,6 +107,8 @@ state = {
     "gmat_loaded": False,
     "gmatpy": None,
     "kernel_downloaded": False,
+    # check_pck has tried to update the Earth PCK this session (pass or fail)
+    "pck_refreshed": False,
     "pot_coef_loaded": False,
     # Resolved full path (os.path.realpath) of the cached potential file
     "pot_file": None,

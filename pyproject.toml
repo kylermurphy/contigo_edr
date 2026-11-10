@@ -80,6 +80,7 @@ include = ["contigo*"]
 contigo = [
     "data/*.tls",
     "data/*.bpc",
+    "data/*.tpc",
     "data/*.bsp",
     "data/*.hdf",
     "data/EIGEN-2.gfc",
