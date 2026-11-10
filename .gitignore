@@ -73,7 +73,8 @@ docs/_build/
 
 # PyBuilder
 .pybuilder/
-#target/
+# Maven build output (java_src/target); the jar is tracked at contigo/java/
+target/
 
 # Jupyter Notebook
 .ipynb_checkpoints

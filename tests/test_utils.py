@@ -158,6 +158,41 @@ def test_dl_file_unknown_length_asks_head(tmp_path, monkeypatch):
     assert target.read_bytes() == data
 
 
+def test_dl_file_passes_timeouts_and_returns_size(tmp_path, monkeypatch):
+    """dl_file: GET and HEAD get a (connect, read) timeout; the size is returned."""
+    data = b"x" * 64
+    seen = []
+
+    def fake_get(url, **kw):
+        seen.append(("get", kw.get("timeout")))
+        return FakeResponse(200, {}, FakeRaw(data))
+
+    def fake_head(url, **kw):
+        seen.append(("head", kw.get("timeout")))
+        return FakeResponse(200, {"Content-Length": str(len(data))})
+
+    monkeypatch.setattr(utils.requests, "get", fake_get)
+    monkeypatch.setattr(utils.requests, "head", fake_head)
+
+    assert _real_dl_file(URL, str(tmp_path / "f.bin")) == len(data)
+    assert seen == [("get", (10, 60)), ("head", (10, 60))]
+
+
+def test_dl_file_content_encoded_returns_zero(tmp_path, monkeypatch):
+    """dl_file: Content-Length of an encoded body is not the size on disk."""
+    data = b"x" * 64
+    monkeypatch.setattr(
+        utils.requests,
+        "get",
+        lambda url, **kw: FakeResponse(
+            200,
+            {"Content-Length": "20", "Content-Encoding": "gzip"},
+            FakeRaw(data),
+        ),
+    )
+    assert _real_dl_file(URL, str(tmp_path / "f.bin"), timeout=5) == 0
+
+
 def test_dl_file_http_error_raises_and_writes_nothing(tmp_path, monkeypatch):
     """dl_file: a 4xx status raises ``HTTPError`` (via ``raise_for_status``)."""
     monkeypatch.setattr(utils.requests, "get", lambda url, **kw: FakeResponse(404))

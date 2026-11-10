@@ -7,8 +7,8 @@ Data and network
   (``$CONTIGO_CACHE_DIR`` if set, else the platformdirs user cache dir).
 - :func:`is_offline`: ``CONTIGO_OFFLINE=1`` blocks ``utils.dl_file`` (raises
   :class:`OfflineError`), ``utils.wf_mtime`` (returns None) and the Orekit
-  GitLab SHA query. Until R5, starting Orekit offline raises
-  :class:`OfflineError` instead of using a local data zip.
+  GitLab SHA query; Orekit then starts from the newest local data zip
+  (``contigo.contigo_utils.orekit_utils.resolve_orekit_data``).
 
 added: 19/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
