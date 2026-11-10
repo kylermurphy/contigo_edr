@@ -4,18 +4,14 @@ added: 04/03/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 import logging
-import posixpath
-import urllib.parse
-from datetime import datetime
-from os import path
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 import spiceypy as spice
-from dateutil import tz
 
 import contigo.config as config
-import contigo.contigo_utils.utils as utils
+from contigo.contigo_utils import kernels
 from contigo.ephemeris.base import EphemerisProvider
 
 logger = logging.getLogger(__name__)
@@ -88,50 +84,43 @@ class SPICEEphem(EphemerisProvider):
         return r_body
 
     def load_kernels(self):
-        """Download and load the SPICE kernels for deriving body locations
+        """Find, download if needed, and load the SPICE kernels.
 
-        Checks if an attemp at downloading the kernels has already been done.
+        Loads the ephemeris (``<ephemeris>.bsp``), leap-second
+        (``config.LEAP_FILE``) and Earth orientation (``config.PCK_FILE``)
+        kernels. Each is looked up in the per-user cache
+        (``config.cache_dir("spice")``), then in the bundled ``DATA_DIR``;
+        downloads always go to the cache. The first call in a session
+        (``config.state["kernel_downloaded"]`` False) also checks NAIF for
+        newer versions (:meth:`dl_kernels`); later calls only download
+        kernels that are missing.
 
-        Download will check if files have changed and need to be redownloaded.
-        Checks if kernels are already loaded.
-
-        Loads the kernels.
-
-        Currently loads leap seconds (.tls), ephemeris (.bsp), and Earth orientation
-        data (.bpc)
+        A kernel already loaded from the same file (compared by normalised
+        real path) is not loaded again. A loaded kernel with the same file name
+        at another path (e.g. the bundled copy, after a newer one was
+        downloaded) is unloaded first.
         """
-        # set file names
-        ephem_f = f"{self.ephemeris}.bsp"
-        leaps_f = config.LEAP_FILE
-        pck_f = config.PCK_FILE
-        # get file paths
-        sp_kernels = [
-            path.join(config.DATA_DIR, fp) for fp in [ephem_f, leaps_f, pck_f]
-        ]
+        files = (f"{self.ephemeris}.bsp", config.LEAP_FILE, config.PCK_FILE)
 
-        # check if we've already attempted to download kernels
+        # check NAIF for newer kernels once per session
         if config.state["kernel_downloaded"] is False:
-            self.dl_kernels(ephem_f, leaps_f, pck_f)
+            sp_kernels = self.dl_kernels(*files)
+        else:
+            sp_kernels = [kernels.ensure_kernel(f, check_remote=False) for f in files]
 
-        # check if kernels are already loaded, load them if not
-        sp_kcnt = spice.ktotal("ALL")
-        sp_loaded = [spice.kdata(i, "ALL")[0] for i in range(sp_kcnt)]
         for fp in sp_kernels:
-            if fp in sp_loaded:
-                logger.info("Kernel already loaded - %s", fp)
-            else:
-                logger.info("Loading Kernel - %s", fp)
-                spice.furnsh(fp)  # need to check if kernels are loaded
+            kernels.furnsh_kernel(fp)
 
-    def dl_kernels(self, ephem_f: str, leaps_f: str, pck_f: str):
-        """Download required JPL SPICE kernels.
+    def dl_kernels(self, ephem_f: str, leaps_f: str, pck_f: str) -> list[Path]:
+        """Find or download the JPL SPICE kernels.
 
-        Download ephemeris, leap second, and Earth orientation Kernels from JPLs
-        Navigation and Ancillary Information Facility (NAIF).
-
-        Will check if local files exist. Will download if files on the server are newer
-        then the local files. With ``CONTIGO_OFFLINE`` set the modification-time
-        check is skipped and a missing kernel raises ``config.OfflineError``.
+        Download ephemeris, leap second, and Earth orientation kernels from
+        JPL's Navigation and Ancillary Information Facility (NAIF) into
+        ``config.cache_dir("spice")`` if they are not found locally (cache,
+        then bundled ``DATA_DIR``), or if the NAIF copy is newer than the local
+        file. With ``CONTIGO_OFFLINE`` set the modification-time check is
+        skipped and a missing kernel raises ``config.OfflineError``. Sets
+        ``config.state["kernel_downloaded"]`` when all three are available.
 
         Parameters
         ----------
@@ -141,46 +130,12 @@ class SPICEEphem(EphemerisProvider):
             JPL leap seconds file to download.
         pck_f : str
             JPL Earth orientation file to download.
+
+        Returns
+        -------
+        list[pathlib.Path]
+            Local paths of the three kernels, in the order given.
         """
-        base_url = "https://naif.jpl.nasa.gov"
-        base_pth = "/pub/naif/generic_kernels"
-
-        ephem_d = "spk/planets"
-        leaps_d = "lsk"
-        pck_d = "pck"
-
-        ephem_url = urllib.parse.urljoin(
-            base_url, posixpath.join(base_pth, ephem_d, ephem_f)
-        )
-        leaps_url = urllib.parse.urljoin(
-            base_url, posixpath.join(base_pth, leaps_d, leaps_f)
-        )
-        pck_url = urllib.parse.urljoin(base_url, posixpath.join(base_pth, pck_d, pck_f))
-
-        for url, file in zip(
-            [ephem_url, leaps_url, pck_url], [ephem_f, leaps_f, pck_f], strict=True
-        ):
-            # create file names
-            fp = path.join(config.DATA_DIR, file)
-            if not path.exists(fp):
-                # raises config.OfflineError (naming the url) when offline
-                logger.info("Downloading kernel - %s", fp)
-                utils.dl_file(url, fp)
-            elif config.is_offline():
-                logger.info("CONTIGO_OFFLINE set; using local kernel %s", fp)
-            else:
-                # check for modification times
-                loc_tz = datetime.now().astimezone().tzinfo
-                gmt_tz = tz.gettz("GMT")
-
-                mod_file = datetime.fromtimestamp(path.getmtime(fp), tz=loc_tz)
-                mod_file = mod_file.astimezone(gmt_tz)
-                mod_url = utils.wf_mtime(url)
-
-                if mod_url is None:
-                    logger.info("Could not determine modification time of %s", url)
-                elif mod_url > mod_file:
-                    logger.info("Downloading new version of %s", url)
-                    utils.dl_file(url, fp)
-
+        paths = [kernels.ensure_kernel(f) for f in (ephem_f, leaps_f, pck_f)]
         config.state["kernel_downloaded"] = True
+        return paths

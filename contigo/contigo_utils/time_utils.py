@@ -4,9 +4,6 @@ added: 26/02/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
 
 import logging
-import os
-import posixpath
-import urllib.parse
 
 import numpy as np
 import numpy.typing as npt
@@ -14,7 +11,7 @@ import pandas as pd
 import spiceypy as spice
 
 import contigo.config as config
-from contigo.contigo_utils import utils
+from contigo.contigo_utils import kernels
 
 logger = logging.getLogger(__name__)
 
@@ -83,42 +80,21 @@ def spice_time(stime: npt.ArrayLike, tscale: str, out_scale: str):
 def check_lpsk():
     """Make sure the SPICE leap-second kernel is loaded.
 
-    If the kernel (``config.LEAP_FILE``) is not in the SPICE kernel pool it is
-    furnished from ``config.DATA_DIR``; if it is not there either, it is first
-    downloaded from the NAIF generic kernels server.
-
-    Parameters
-    ----------
-    None
-
-    Returns
-    -------
-    None
+    If no kernel named ``config.LEAP_FILE`` is in the SPICE kernel pool, it is
+    looked up in the per-user cache (``config.cache_dir("spice")``), then in
+    the bundled ``config.DATA_DIR``, and furnished. If it is in neither, it is
+    first downloaded from the NAIF generic kernels server into the cache.
+    There is no check for a newer version on NAIF (``SPICEEphem`` does that).
 
     Raises
     ------
+    contigo.config.OfflineError
+        If the kernel must be downloaded and ``CONTIGO_OFFLINE`` is set.
     Exception
-        Any error raised by the download (``utils.dl_file``) or by
+        Any other error raised by the download (``utils.dl_file``) or by
         ``spiceypy.furnsh`` is propagated unchanged.
     """
-    # get the leapsecond kernel and make sure it's
-    # loaded, download it if we don't have it
     leaps_f = config.LEAP_FILE
-    lp_kernel = os.path.join(config.DATA_DIR, leaps_f)
-
-    sp_kcnt = spice.ktotal("ALL")
-    sp_loaded = [os.path.basename(spice.kdata(i, "ALL")[0]) for i in range(sp_kcnt)]
-    if os.path.exists(lp_kernel) and leaps_f not in sp_loaded:
-        spice.furnsh(lp_kernel)  # need to check if kernels are loaded
-    elif leaps_f not in sp_loaded:
-        base_url = "https://naif.jpl.nasa.gov"
-        base_pth = "/pub/naif/generic_kernels"
-        leaps_d = "lsk"
-
-        leaps_url = urllib.parse.urljoin(
-            base_url, posixpath.join(base_pth, leaps_d, leaps_f)
-        )
-
-        logger.info("Downloading kernel - %s", lp_kernel)
-        utils.dl_file(leaps_url, lp_kernel)
-        spice.furnsh(lp_kernel)
+    if kernels.is_loaded(leaps_f):
+        return
+    kernels.furnsh_kernel(kernels.ensure_kernel(leaps_f, check_remote=False))
