@@ -202,7 +202,8 @@ def test_tu05_check_lpsk_downloads_missing_file(tmp_path, monkeypatch):
 
     check_lpsk()
 
-    assert downloads == [(LEAP_URL, expected)]
+    # written to a per-process .part file first, then moved into place
+    assert downloads == [(LEAP_URL, f"{expected}.{os.getpid()}.part")]
     assert calls == [expected]
     assert os.path.exists(expected)
     assert os.listdir(data_dir) == []

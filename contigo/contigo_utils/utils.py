@@ -68,7 +68,12 @@ def dl_file(url, filename, timeout=(10, 60)):
 
     # if requests couldn't get file size drop encoding to get it
     if file_size == 0:
-        rs = requests.head(url, headers={"Accept-Encoding": None}, timeout=timeout)
+        rs = requests.head(
+            url,
+            headers={"Accept-Encoding": None},
+            allow_redirects=True,  # else the size is that of the redirect page
+            timeout=timeout,
+        )
         file_size = int(rs.headers.get("Content-Length", 0))
 
     fpath = pathlib.Path(filename).expanduser().resolve()

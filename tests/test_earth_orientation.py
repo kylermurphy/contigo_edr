@@ -1,4 +1,4 @@
-"""Tests for ``kernels.check_pck`` and the PCK coverage helpers (EO-01 .. EO-07).
+"""Tests for ``kernels.check_pck`` and the PCK coverage helpers (EO-01 .. EO-08).
 
 Expected values: the bundled ``earth_latest_high_prec.bpc`` covers ITRF93
 (SPICE body 3000) from 2000-01-01 to 2026-05-30 (``spice.pckcov``). No test
@@ -9,12 +9,14 @@ added: 10/11/2026 Claude Code
 
 from __future__ import annotations
 
+import shutil
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pytest
+import requests
 import spiceypy as spice
 
 import contigo.config as config
@@ -137,3 +139,36 @@ def test_eo07_fallback_frame_needs_the_bundled_text_pck():
     assert np.allclose(rot @ rot.T, np.eye(3), atol=1e-12)
     assert np.linalg.det(rot) == pytest.approx(1.0, abs=1e-12)
     assert not np.allclose(rot, np.eye(3))  # a real rotation, not the identity
+
+
+def test_eo08_cut_off_refresh_keeps_the_cached_pck_usable(
+    fresh_session, tmp_path, monkeypatch
+):
+    """EO-08 (F32): a PCK refresh that fails part-way leaves the cached PCK
+    intact and loaded, so covered epochs still get ITRF93 afterwards.
+
+    Before the fix the cached file was unloaded and then overwritten by the
+    partial download, and the next ``furnsh`` failed on every later run.
+    """
+    monkeypatch.delenv("CONTIGO_OFFLINE", raising=False)
+    cached = tmp_path / "spice" / config.PCK_FILE
+    cached.parent.mkdir()
+    shutil.copyfile(kernels.ensure_kernel(config.PCK_FILE, check_remote=False), cached)
+    original = cached.read_bytes()
+    monkeypatch.setattr(
+        utils, "wf_mtime", lambda url: datetime(2099, 1, 1, tzinfo=timezone.utc)
+    )
+
+    def cut_off(url, filename):
+        Path(filename).write_bytes(b"DAF/PCK truncated")
+        raise requests.exceptions.ConnectionError("connection reset")
+
+    monkeypatch.setattr(utils, "dl_file", cut_off)
+    try:
+        with pytest.warns(RuntimeWarning, match="IAU_EARTH"):
+            assert kernels.check_pck([ET_2026_09]) == "IAU_EARTH"
+        assert cached.read_bytes() == original
+        assert kernels.check_pck([ET_2018]) == "ITRF93"
+        assert sorted(p.name for p in cached.parent.iterdir()) == [config.PCK_FILE]
+    finally:
+        kernels._unload_path(cached)  # the next test reloads the bundled copy

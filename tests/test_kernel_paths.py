@@ -11,11 +11,13 @@ added: 09/11/2026 Claude Code
 from __future__ import annotations
 
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+import requests
 import spiceypy as spice
 
 import contigo.config as config
@@ -32,6 +34,7 @@ URLS = {
     config.PCK_FILE: f"{NAIF}/pck/{config.PCK_FILE}",
 }
 OLD = datetime(2000, 1, 1, tzinfo=timezone.utc)
+NEW = datetime(2099, 1, 1, tzinfo=timezone.utc)  # NAIF copy is newer
 
 
 class FakePool:
@@ -71,11 +74,15 @@ def dirs(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_dl(monkeypatch):
-    """``dl_file`` that writes a tiny file and records ``(url, filename)``."""
+    """``dl_file`` that writes a tiny file and records ``(url, target)``.
+
+    ``kernels._download`` writes to ``<target>.<pid>.part`` and then moves it
+    into place, so the final ``target`` is recorded.
+    """
     downloads: list[tuple[str, str]] = []
 
     def _dl(url, filename):
-        downloads.append((url, filename))
+        downloads.append((url, re.sub(r"\.\d+\.part$", "", filename)))
         Path(filename).parent.mkdir(parents=True, exist_ok=True)
         Path(filename).write_text("downloaded")
 
@@ -278,3 +285,91 @@ def test_load_kernels_replaces_bundled_with_newer_download(dirs, fake_dl, monkey
     sp.load_kernels()
     assert pool.calls == []
     assert len(fake_dl) == 1
+
+
+# ---------------------------------------------------------------------------
+# Atomic downloads (F32): a failed download never replaces the cached kernel
+# ---------------------------------------------------------------------------
+def test_failed_download_keeps_cached_kernel(dirs, monkeypatch, caplog):
+    """A refresh cut off part-way leaves the cached kernel, no ``.part`` file,
+    and ``ensure_kernel`` falls back to the cached copy with a warning."""
+    _, cache = dirs
+    cached = _old_file(cache / config.PCK_FILE)
+    monkeypatch.setattr(utils, "wf_mtime", lambda url: NEW)
+
+    def cut_off(url, filename):
+        Path(filename).write_bytes(b"trunc")
+        raise requests.exceptions.ConnectionError("connection reset")
+
+    monkeypatch.setattr(utils, "dl_file", cut_off)
+    with caplog.at_level("WARNING", logger="contigo.contigo_utils.kernels"):
+        assert kernels.ensure_kernel(config.PCK_FILE) == cached
+    assert "connection reset" in caplog.text
+    assert cached.read_text() == "local"
+    assert list(cache.iterdir()) == [cached]
+
+
+def test_failed_download_of_missing_kernel_raises(dirs, monkeypatch):
+    """With no local copy to fall back to, the download error is raised."""
+    _, cache = dirs
+
+    def cut_off(url, filename):
+        Path(filename).write_bytes(b"trunc")
+        raise requests.exceptions.ConnectionError("connection reset")
+
+    monkeypatch.setattr(utils, "dl_file", cut_off)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        kernels.ensure_kernel(config.PCK_FILE)
+    assert not cache.exists() or list(cache.iterdir()) == []
+
+
+def test_short_download_is_rejected(dirs, monkeypatch):
+    """A download shorter than ``Content-Length`` raises ``OSError`` and the
+    cached kernel is kept."""
+    _, cache = dirs
+    cached = _old_file(cache / config.PCK_FILE)
+
+    def short(url, filename):
+        Path(filename).write_bytes(b"12345")
+        return 10  # what the server announced
+
+    monkeypatch.setattr(utils, "dl_file", short)
+    with pytest.raises(OSError, match="5 of 10 bytes"):
+        kernels._download("https://example.invalid/k.bpc", cached)
+    assert cached.read_text() == "local"
+    assert list(cache.iterdir()) == [cached]
+
+
+def test_failed_replace_reloads_the_old_kernel(dirs, monkeypatch):
+    """If moving the download into place fails (file locked), the kernel that
+    was unloaded for the swap is loaded again."""
+    _, cache = dirs
+    cached = _old_file(cache / config.PCK_FILE)
+    pool = FakePool([cached]).install(monkeypatch)
+    monkeypatch.setattr(utils, "dl_file", lambda url, fn: Path(fn).write_bytes(b"x"))
+
+    def locked(src, dst):
+        raise PermissionError("file in use")
+
+    monkeypatch.setattr(kernels.os, "replace", locked)
+    with pytest.raises(PermissionError):
+        kernels._download("https://example.invalid/k.bpc", cached)
+    assert pool.calls == [("unload", str(cached)), ("furnsh", str(cached))]
+    assert cached.read_text() == "local"
+    assert list(cache.iterdir()) == [cached]
+
+
+def test_complete_download_replaces_cached_kernel(dirs, monkeypatch):
+    """A complete download (matching size) replaces the cached copy."""
+    _, cache = dirs
+    cached = _old_file(cache / config.PCK_FILE)
+    monkeypatch.setattr(utils, "wf_mtime", lambda url: NEW)
+
+    def ok(url, filename):
+        Path(filename).write_bytes(b"new kernel")
+        return 10
+
+    monkeypatch.setattr(utils, "dl_file", ok)
+    assert kernels.ensure_kernel(config.PCK_FILE) == cached
+    assert cached.read_bytes() == b"new kernel"
+    assert list(cache.iterdir()) == [cached]
