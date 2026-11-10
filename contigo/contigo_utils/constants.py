@@ -23,3 +23,8 @@ jpl_de440 = {
 GMc = {"de440": jpl_de440}
 
 WGS84_EARTH_ANGULAR_VELOCITY = 7.292115e-05
+
+# WGS-84 reference ellipsoid (NIMA TR8350.2)
+WGS84_A = 6378137.0  # semi-major axis [m]
+WGS84_F = 1.0 / 298.257223563  # flattening
+WGS84_E2 = WGS84_F * (2.0 - WGS84_F)  # first eccentricity squared
