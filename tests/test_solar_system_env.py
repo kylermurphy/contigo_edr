@@ -114,36 +114,63 @@ def test_ep04_only_missing_bins_requested():
 
 
 def test_ep04_tolerance_binning():
-    """EP-04: times inside one tolerance bin share one cache entry.
+    """EP-04 / F21: times inside one tolerance bin share one cache entry.
 
     Expected: bins are ``round(gps / tol)``. With tol=0.5, 100.0 and 100.2 both
     map to bin 200 (one cache entry); 100.3 maps to bin 201 (a new entry). A
     later request for another time in a cached bin makes no provider call.
 
-    This also pins CURRENT behaviour (to be logged as a finding): when two
-    uncached times fall in the same bin they are both sent to the provider
-    (duplicate provider work within a bin) and the last one written wins, so
-    the bin holds the position of 100.2, not of the first-requested 100.0.
+    Contract (R18): an uncached bin is requested once, represented by the
+    first time in request order (100.0), whatever later times share the bin;
+    the bin then holds the position at 100.0.
     """
     prov = FakeProvider()
     env = _env(prov, tolerance=0.5)
 
     r = _get(env, [100.0, 100.2])
     assert prov.calls == 1
-    # both times are requested from the provider ...
-    assert np.array_equal(prov.requested[0], np.array([100.0, 100.2]) + ET_OFFSET)
+    # only the first time of the bin is requested ...
+    assert np.array_equal(prov.requested[0], np.array([100.0]) + ET_OFFSET)
     assert set(env._cache) == {200}
-    # ... and the shared bin holds the last-requested value (100.2)
-    expected = FakeProvider()(BODIES, ephem_time=np.array([100.2 + ET_OFFSET]))
+    # ... and the shared bin holds its value (100.0)
+    expected = FakeProvider()(BODIES, ephem_time=np.array([100.0 + ET_OFFSET]))
     assert np.array_equal(env._cache[200], expected[:, 0])
     assert np.array_equal(r[:, 0], r[:, 1])  # same bin -> same stored position
     assert np.array_equal(r[:, 0], expected[:, 0])
 
     _get(env, [99.8])  # bin 200 again
     assert prov.calls == 1
+    assert np.array_equal(env._cache[200], expected[:, 0])  # unchanged
     _get(env, [100.3])  # bin 201
     assert prov.calls == 2
     assert set(env._cache) == {200, 201}
+
+
+def test_ep04_bin_first_requested_time_represents_bin():
+    """F21: the first-requested time of a bin represents it, in any order.
+
+    Expected: in reverse order (100.2 then 100.0) only 100.2 is requested and
+    the bin holds the position at 100.2. Several bins with interleaved
+    duplicates: one provider call, each bin requested once, in first-seen
+    order, and every returned time carries its bin's value.
+    """
+    prov = FakeProvider()
+    env = _env(prov, tolerance=0.5)
+    r = _get(env, [100.2, 100.0])
+    assert np.array_equal(prov.requested[0], np.array([100.2]) + ET_OFFSET)
+    expected = FakeProvider()(BODIES, ephem_time=np.array([100.2 + ET_OFFSET]))
+    assert np.array_equal(r, np.repeat(expected, 2, axis=1))
+
+    prov = FakeProvider()
+    env = _env(prov, tolerance=0.5)
+    gps = [10.1, 20.0, 10.0, 9.9, 20.2, 30.0, 19.8]  # bins 20, 40, 20, 20, 40, 60, 40
+    r = _get(env, gps)
+    assert prov.calls == 1
+    firsts = np.array([10.1, 20.0, 30.0])
+    assert np.array_equal(prov.requested[0], firsts + ET_OFFSET)
+    assert set(env._cache) == {20, 40, 60}
+    want = FakeProvider()(BODIES, ephem_time=firsts + ET_OFFSET)
+    assert np.array_equal(r, want[:, [0, 1, 0, 0, 1, 2, 1]])
 
 
 def test_ep04_tolerance_none_exact_times():
@@ -272,24 +299,28 @@ def test_ep05_gm_from_provider_ephemeris(name):
 def test_ep05_gm_uses_provider_ephemeris_key():
     """EP-05: the GM table is selected by the provider's ephemeris name.
 
-    Expected: an ephemeris with no entry in ``GMc`` raises ``KeyError``.
+    Expected: an ephemeris with no entry in ``GMc`` raises a ``ValueError``
+    naming the ephemeris and listing the known ones, before any provider call.
     """
-    with pytest.raises(KeyError):
-        SolarSystemEnvironment(BODIES, 0.001, _prov("de999"))
+    prov = _prov("de999")
+    with pytest.raises(ValueError, match=r"'de999'.*\['de440'\]"):
+        SolarSystemEnvironment(BODIES, 0.001, prov, *_times([0.0]))
+    assert prov.calls == 0
 
 
-def test_ep05_unknown_body_raises():
-    """EP-05: a body without a GM entry raises (currently a bare ``KeyError``)."""
-    with pytest.raises(KeyError):
-        SolarSystemEnvironment(["SUN", "NOTABODY"], 0.001, FakeProvider())
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=KeyError,
-    reason="EP-05 proposal: clear ValueError for unknown body",
-)
 def test_ep05_unknown_body_value_error():
-    """EP-05 (proposal): an unknown body should raise a clear ``ValueError``."""
-    with pytest.raises(ValueError):
-        SolarSystemEnvironment(["SUN", "NOTABODY"], 0.001, FakeProvider())
+    """EP-05: an unknown body raises a clear ``ValueError``.
+
+    Expected: the message names the unknown body and lists the known bodies
+    of that ephemeris (``unit`` metadata excluded); no provider call is made,
+    even when preload times are given.
+    """
+    prov = FakeProvider()
+    with pytest.raises(ValueError) as exc:
+        SolarSystemEnvironment(["SUN", "notabody"], 0.001, prov, *_times([0.0]))
+    msg = str(exc.value)
+    assert "NOTABODY" in msg and "de440s" in msg
+    for body in ("SUN", "MOON", "EARTH", "PLUTO"):
+        assert f"'{body}'" in msg
+    assert "unit" not in msg
+    assert prov.calls == 0
