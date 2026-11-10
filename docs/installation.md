@@ -40,6 +40,37 @@ at import.
 **Google Colab:** the tutorials in `notebooks/tutorials/` have an "Open in Colab" badge and a
 first cell that clones the repository and installs it.
 
+## Environment variables
+
+CONTIGO reads two optional environment variables. Both are read each time they are needed,
+not once at import, so setting them in Python after `import contigo` also works.
+
+| Variable | Effect |
+|----------|--------|
+| `CONTIGO_CACHE_DIR` | Folder for downloaded data, in place of the default cache folder (below) |
+| `CONTIGO_OFFLINE` | `1` (or `true`, `yes`, `on`) stops all network requests (see [Offline use and HPC](#offline-use-and-hpc)) |
+
+Set them for one session:
+
+```bash
+export CONTIGO_OFFLINE=1                        # Linux / macOS (bash, zsh)
+$env:CONTIGO_OFFLINE = "1"                      # Windows PowerShell
+set CONTIGO_OFFLINE=1                           # Windows cmd
+```
+
+or in Python, before the code that downloads:
+
+```python
+import os
+os.environ["CONTIGO_CACHE_DIR"] = "/scratch/me/contigo-cache"
+os.environ["CONTIGO_OFFLINE"] = "1"
+```
+
+To make them permanent, add the `export` line to `~/.bashrc` (or `~/.zshrc`), or on Windows
+use **Settings > System > About > Advanced system settings > Environment Variables** (or
+`setx CONTIGO_OFFLINE 1`, which applies to new terminals). On a cluster, put the `export`
+lines in your job script.
+
 ## Bundled data
 
 These files are installed with the package (`contigo/data/`, read-only). Find them with
