@@ -41,3 +41,11 @@ def test_data_dir_exists():
 @pytest.mark.parametrize("fname", BUNDLED_FILES)
 def test_bundled_data_present(fname):
     assert (Path(config.DATA_DIR) / fname).is_file()
+
+
+def test_version_matches_installed_metadata():
+    from importlib.metadata import version
+
+    assert isinstance(contigo.__version__, str)
+    assert contigo.__version__
+    assert contigo.__version__ == version("contigo")
