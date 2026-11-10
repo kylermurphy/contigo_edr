@@ -1,6 +1,9 @@
-"""Coordinate conversions: ECEF <-> WGS-84 geodetic.
+"""Coordinate conversions: ECEF <-> WGS-84 geodetic and ECEF <-> inertial.
 
-Positions are metres and angles radians. Pure NumPy, no SPICE or network.
+Positions are metres, velocities m/s, angles radians. The geodetic functions are
+pure NumPy. The frame transforms use SPICE (``sxform``/``pxform``) and need the
+Earth-orientation PCK, which :func:`contigo.contigo_utils.kernels.check_pck`
+loads, so no Java or network access is needed for epochs the PCK covers.
 
 added: 10/11/2026 Kyle Murphy <kylemurphy.spacephys@gmail.com>
 """
