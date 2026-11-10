@@ -222,3 +222,7 @@ ig_*
 
 # keep the bundled gravity field (other .gfc files are downloaded on demand)
 !contigo/data/EIGEN-2.gfc
+
+# Orekit data is downloaded into the user cache (R5); never track it
+contigo/data/orekit_data_*.zip
+*.part

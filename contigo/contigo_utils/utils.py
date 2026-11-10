@@ -118,7 +118,7 @@ def wf_mtime(url):
         else:
             return None
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching URL: {e}")
+        logger.warning("Could not get the modification time of %s: %s", url, e)
         return None
 
 
